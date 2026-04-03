@@ -46,7 +46,7 @@ export default function CalendarPage() {
           </p>
         </div>
 
-        {hasCalendar && (
+        {hasCalendar ? (
           <div style={{ marginBottom: 32 }}>
             <iframe
               src={`https://calendar.google.com/calendar/embed?src=${encodeURIComponent(GOOGLE_CONFIG.calendarId)}&ctz=America/Detroit`}
@@ -56,6 +56,26 @@ export default function CalendarPage() {
                 boxShadow: `0 2px 12px ${COLORS.navy}08`,
               }}
             />
+          </div>
+        ) : (
+          <div style={{
+            width: '100%', minHeight: 320, borderRadius: 12, marginBottom: 32,
+            background: `linear-gradient(135deg, ${COLORS.deepBlue}, ${COLORS.midnightGreen})`,
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+            border: `1px solid ${COLORS.electric}22`,
+          }}>
+            <div style={{
+              width: 56, height: 56, borderRadius: '50%', marginBottom: 14,
+              background: `${COLORS.electric}25`, display: 'flex',
+              alignItems: 'center', justifyContent: 'center',
+              fontSize: 26, border: `2px solid ${COLORS.electric}44`,
+            }}>{'\uD83D\uDCC5'}</div>
+            <span style={{ color: COLORS.ice, fontSize: 16, fontWeight: 700, fontFamily: "'DM Sans', sans-serif" }}>
+              Google Calendar
+            </span>
+            <span style={{ color: COLORS.ice, fontSize: 12, opacity: 0.6, marginTop: 6, fontFamily: "'DM Sans', sans-serif", textAlign: 'center', maxWidth: 320 }}>
+              Shared project calendar with workshop dates, milestones, and stakeholder events will be embedded here once configured.
+            </span>
           </div>
         )}
 

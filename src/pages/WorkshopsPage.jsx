@@ -25,12 +25,24 @@ export default function WorkshopsPage({ workshopData }) {
             Each workshop stands alone &mdash; attend one or all.
           </p>
           <div style={{
-            width: '100%', minHeight: 200, borderRadius: 8,
-            background: COLORS.white, border: `1px dashed ${COLORS.electric}33`,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            color: COLORS.slate, fontSize: 14, fontFamily: "'DM Sans', sans-serif",
+            width: '100%', minHeight: 220, borderRadius: 8,
+            background: `linear-gradient(135deg, ${COLORS.frost}, ${COLORS.white})`,
+            border: `1.5px dashed ${COLORS.electric}33`,
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+            gap: 10, padding: 24,
           }}>
-            Google Form registration will be embedded here
+            <div style={{
+              width: 48, height: 48, borderRadius: 12,
+              background: `${COLORS.electric}15`, display: 'flex',
+              alignItems: 'center', justifyContent: 'center',
+              fontSize: 22, border: `1px solid ${COLORS.electric}22`,
+            }}>{'\uD83D\uDCDD'}</div>
+            <span style={{ color: COLORS.darkSlate, fontSize: 15, fontWeight: 700, fontFamily: "'DM Sans', sans-serif" }}>
+              Workshop Registration Form
+            </span>
+            <span style={{ color: COLORS.slate, fontSize: 12.5, fontFamily: "'DM Sans', sans-serif", textAlign: 'center', maxWidth: 400 }}>
+              A Google Form for workshop registration will be embedded here. Participants will be able to sign up directly on this page.
+            </span>
           </div>
         </div>
 
