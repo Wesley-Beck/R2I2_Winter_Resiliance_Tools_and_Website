@@ -304,6 +304,11 @@ const App = {
     _mode: "historical",
 
     async init() {
+        document.getElementById("status-text").textContent = "Initializing...";
+
+        // Detect API server (non-blocking, falls back to static files)
+        await DataLoader.detectApiServer();
+
         document.getElementById("status-text").textContent = "Initializing map...";
         MapLayer.initMap();
         UIControls.init();

@@ -194,8 +194,9 @@ def extract_month(year, month, points_df, output_base, loader=None,
                      year, month, len(all_day_data))
     else:
         # Chunk-based S3 fetching: load 6 days at once (ZARR chunk alignment)
+        # Uses 2-deep prefetch buffer to hide more S3 latency
         all_day_data = {}
-        executor = ThreadPoolExecutor(max_workers=2)
+        executor = ThreadPoolExecutor(max_workers=3)
 
         chunks = []
         d = 1
@@ -204,37 +205,42 @@ def extract_month(year, month, points_df, output_base, loader=None,
             chunks.append((d, end))
             d = end + 1
 
-        chunk_idx = 0
-        prefetch_future = executor.submit(
-            _prefetch_chunk, loader, year, month, chunks[0][0], chunks[0][1],
-            lat_indices, lon_indices, lat_bounds, lon_bounds,
-        )
+        # Submit first 2 chunks immediately (2-deep prefetch)
+        futures = {}
+        for i in range(min(2, len(chunks))):
+            futures[i] = executor.submit(
+                _prefetch_chunk, loader, year, month,
+                chunks[i][0], chunks[i][1],
+                lat_indices, lon_indices, lat_bounds, lon_bounds,
+            )
 
-        for chunk_start, chunk_end in chunks:
+        for chunk_idx, (chunk_start, chunk_end) in enumerate(chunks):
             if callback:
                 pct = 100.0 * hours_processed / total_hours
                 callback(pct, f"Fetching {year}-{month:02d} days {chunk_start}-{chunk_end}...")
 
             try:
-                chunk_data = prefetch_future.result(timeout=300)
+                chunk_data = futures[chunk_idx].result(timeout=300)
             except Exception as e:
                 logger.error("Failed to fetch AORC chunk %s-%02d days %d-%d: %s",
                              year, month, chunk_start, chunk_end, e)
                 hours_processed += (chunk_end - chunk_start + 1) * 24
-                chunk_idx += 1
-                if chunk_idx < len(chunks):
-                    prefetch_future = executor.submit(
+                # Submit next prefetch even on failure
+                next_idx = chunk_idx + 2
+                if next_idx < len(chunks):
+                    futures[next_idx] = executor.submit(
                         _prefetch_chunk, loader, year, month,
-                        chunks[chunk_idx][0], chunks[chunk_idx][1],
+                        chunks[next_idx][0], chunks[next_idx][1],
                         lat_indices, lon_indices, lat_bounds, lon_bounds,
                     )
                 continue
 
-            chunk_idx += 1
-            if chunk_idx < len(chunks):
-                prefetch_future = executor.submit(
+            # Submit the chunk 2 ahead (maintain 2-deep buffer)
+            next_idx = chunk_idx + 2
+            if next_idx < len(chunks):
+                futures[next_idx] = executor.submit(
                     _prefetch_chunk, loader, year, month,
-                    chunks[chunk_idx][0], chunks[chunk_idx][1],
+                    chunks[next_idx][0], chunks[next_idx][1],
                     lat_indices, lon_indices, lat_bounds, lon_bounds,
                 )
 
@@ -242,15 +248,32 @@ def extract_month(year, month, points_df, output_base, loader=None,
 
         executor.shutdown(wait=False)
 
+    # Pre-allocate reusable arrays (avoid per-hour/per-day allocations)
+    _nan_default = np.full(n_points, np.nan, dtype=np.float32)
+    _daily_tmax_f = np.full(n_points, -999.0)
+    _daily_rh_min = np.full(n_points, 999.0)
+    _nfdrs_herb = np.full(n_points, 120.0)
+    _nfdrs_wood = np.full(n_points, 100.0)
+    _fpi_nd_min = np.full(n_points, 0.1)
+    _fpi_nd_max = np.full(n_points, 0.9)
+    _fpi_llfm_arr = np.full(n_points, fpi_llfm)
+    _fpi_dlfm_arr = np.full(n_points, fpi_dlfm)
+    _fpi_mxd_arr = np.full(n_points, fpi_mxd)
+    _rg_proxy = np.empty(n_points)
+
+    # Variables needed for fire index computation
+    _FIRE_VARS = ("TMP_2maboveground", "SPFH_2maboveground", "PRES_surface",
+                  "UGRD_10maboveground", "VGRD_10maboveground", "APCP_surface")
+
     # Process each day
     for day in range(1, n_days + 1):
         if day not in all_day_data:
             hours_processed += 24
             continue
 
-        # Daily accumulators for FPI (needs Tmax and RH_min per day)
-        daily_tmax_f = np.full(n_points, -999.0)
-        daily_rh_min = np.full(n_points, 999.0)
+        # Reset daily accumulators (in-place, no allocation)
+        _daily_tmax_f[:] = -999.0
+        _daily_rh_min[:] = 999.0
 
         daily_data = all_day_data[day]
 
@@ -265,13 +288,12 @@ def extract_month(year, month, points_df, output_base, loader=None,
             current = datetime(year, month, day, hour_val)
             doy = current.timetuple().tm_yday
 
-            raw = {}
-            for var in loader.VARIABLES:
-                if var in daily_data:
-                    raw[var] = daily_data[var][h_idx]
-
-            # Raw AORC
+            # Build raw dict — only variables present in daily data
             if not skip_raw:
+                raw = {}
+                for var in loader.VARIABLES:
+                    if var in daily_data:
+                        raw[var] = daily_data[var][h_idx]
                 if db:
                     for var, values in raw.items():
                         db.add(var, current, values)
@@ -279,14 +301,15 @@ def extract_month(year, month, points_df, output_base, loader=None,
                     for var, values in raw.items():
                         raw_acc.add(var, current, values)
 
-            # Unit conversions
-            temp_k = raw.get("TMP_2maboveground", np.full(n_points, np.nan))
-            spfh = raw.get("SPFH_2maboveground", np.full(n_points, np.nan))
-            pres_pa = raw.get("PRES_surface", np.full(n_points, np.nan))
-            ugrd = raw.get("UGRD_10maboveground", np.full(n_points, np.nan))
-            vgrd = raw.get("VGRD_10maboveground", np.full(n_points, np.nan))
-            precip_mm = raw.get("APCP_surface", np.full(n_points, np.nan))
+            # Extract fire-critical variables (reuse _nan_default instead of allocating)
+            temp_k = daily_data["TMP_2maboveground"][h_idx] if "TMP_2maboveground" in daily_data else _nan_default
+            spfh = daily_data["SPFH_2maboveground"][h_idx] if "SPFH_2maboveground" in daily_data else _nan_default
+            pres_pa = daily_data["PRES_surface"][h_idx] if "PRES_surface" in daily_data else _nan_default
+            ugrd = daily_data["UGRD_10maboveground"][h_idx] if "UGRD_10maboveground" in daily_data else _nan_default
+            vgrd = daily_data["VGRD_10maboveground"][h_idx] if "VGRD_10maboveground" in daily_data else _nan_default
+            precip_mm = daily_data["APCP_surface"][h_idx] if "APCP_surface" in daily_data else _nan_default
 
+            # Unit conversions
             temp_c = kelvin_to_celsius(temp_k)
             temp_f = celsius_to_fahrenheit(temp_c)
             rh = specific_to_relative_humidity(spfh, temp_k, pres_pa)
@@ -326,7 +349,7 @@ def extract_month(year, month, points_df, output_base, loader=None,
                          "FM100": fm["fm100"], "FM1000": fm["fm1000"]}
             nfdrs_result = compute_erc_bi(
                 fm["fm1"], fm["fm10"], fm["fm100"], fm["fm1000"],
-                np.full(n_points, 120.0), np.full(n_points, 100.0),
+                _nfdrs_herb, _nfdrs_wood,
                 ws_mph, fuel_model=fuel_model,
             )
             all_nfdrs.update(nfdrs_result)
@@ -338,26 +361,24 @@ def extract_month(year, month, points_df, output_base, loader=None,
                 for key, values in all_nfdrs.items():
                     nfdrs_acc.add(key, current, values)
 
-            # Track daily extremes for FPI
-            daily_tmax_f = np.maximum(daily_tmax_f, temp_f)
-            daily_rh_min = np.minimum(daily_rh_min, rh)
+            # Track daily extremes for FPI (in-place)
+            np.maximum(_daily_tmax_f, temp_f, out=_daily_tmax_f)
+            np.minimum(_daily_rh_min, rh, out=_daily_rh_min)
 
             # FPI: compute once at end of day (hour 23) using daily Tmax/RH_min
             if current.hour == 23:
-                # Seasonal Relative Greenness proxy (latitude + DOY curve)
-                # Peak greenness ~DOY 190 (July), minimum ~DOY 15 (January)
-                rg_proxy = np.full(n_points, 0.3 + 0.5 * max(0.0,
-                    np.cos((doy - 190) * 2 * np.pi / 365)))
+                rg_val = 0.3 + 0.5 * max(0.0, np.cos((doy - 190) * 2 * np.pi / 365))
+                _rg_proxy[:] = rg_val
 
                 fpi_result = compute_fpi(
-                    nd0=rg_proxy * 0.8,  # Scale RG to NDVI range
-                    nd_min=np.full(n_points, 0.1),
-                    nd_max=np.full(n_points, 0.9),
-                    llfm=np.full(n_points, fpi_llfm),
-                    dlfm=np.full(n_points, fpi_dlfm),
-                    mxd=np.full(n_points, fpi_mxd),
-                    tmax_f=daily_tmax_f,
-                    rh_min=daily_rh_min,
+                    nd0=_rg_proxy * 0.8,
+                    nd_min=_fpi_nd_min,
+                    nd_max=_fpi_nd_max,
+                    llfm=_fpi_llfm_arr,
+                    dlfm=_fpi_dlfm_arr,
+                    mxd=_fpi_mxd_arr,
+                    tmax_f=_daily_tmax_f,
+                    rh_min=_daily_rh_min,
                 )
 
                 if db:

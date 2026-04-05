@@ -135,44 +135,27 @@ class SQLiteStorage:
         variables = [row[0] for row in cursor]
 
         for variable in variables:
-            cursor = self._conn.execute(
+            # Single query: read timestamps and blobs together (was 2 queries before)
+            rows = self._conn.execute(
                 "SELECT timestamp, values_blob FROM data WHERE variable = ? ORDER BY timestamp",
                 (variable,),
-            )
+            ).fetchall()
 
-            # Stream rows instead of fetchall() to reduce peak memory
+            if not rows:
+                continue
+
+            n_points = len(rows[0][1]) // 4  # float32 = 4 bytes
+            n_hours = len(rows)
+            timestamps = [r[0] for r in rows]
+            ts_block = "\n".join(timestamps).encode("utf-8")
+
             bin_path = web_dir / f"{variable}.bin"
             with open(bin_path, "wb", buffering=1048576) as f:
-                # Write placeholder header (updated after we know counts)
-                header_pos = f.tell()
-                f.write(struct.pack("<II", 0, 0))  # placeholder
-                f.write(struct.pack("<I", 0))       # placeholder ts_block_len
-
-                timestamps = []
-                n_hours = 0
-                n_points = 0
-
-                for ts_str, blob in cursor:
-                    timestamps.append(ts_str)
-                    if n_points == 0:
-                        n_points = len(blob) // 4  # float32 = 4 bytes
-                    n_hours += 1
-
-                # Write timestamps block after header
-                ts_block = "\n".join(timestamps).encode("utf-8")
-
-                # Now rewrite header with correct values
-                f.seek(header_pos)
+                # Write header + timestamps + data in one pass
                 f.write(struct.pack("<II", n_points, n_hours))
                 f.write(struct.pack("<I", len(ts_block)))
                 f.write(ts_block)
-
-                # Re-read and write data blobs (streaming from DB)
-                data_cursor = self._conn.execute(
-                    "SELECT values_blob FROM data WHERE variable = ? ORDER BY timestamp",
-                    (variable,),
-                )
-                for (blob,) in data_cursor:
+                for _, blob in rows:
                     f.write(blob)
 
             size_mb = bin_path.stat().st_size / 1048576

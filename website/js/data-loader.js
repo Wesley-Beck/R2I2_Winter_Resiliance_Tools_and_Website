@@ -13,6 +13,7 @@
 
 const DataLoader = {
     basePath: "../data/output",
+    apiBase: null,             // Set to "/api" when using FastAPI server
     pointIndex: null,          // Array of { point_id, latitude, longitude }
     pointIdToIndex: null,      // Map: point_id → array index (for fast lookup)
     nPoints: 0,
@@ -29,6 +30,23 @@ const DataLoader = {
     // Reusable value buffer (avoids allocating 28K-entry objects per frame)
     _valueBuffer: null,
 
+    /**
+     * Auto-detect API server. If /api/points responds, use API mode.
+     * Called once on startup.
+     */
+    async detectApiServer() {
+        try {
+            const resp = await fetch("/api/points", { method: "HEAD" });
+            if (resp.ok) {
+                this.apiBase = "/api";
+                console.log("API server detected at /api — using server mode");
+                return true;
+            }
+        } catch (e) { /* not available */ }
+        console.log("No API server — using static file mode");
+        return false;
+    },
+
     setBasePath(path) {
         this.basePath = path.replace(/\/+$/, "");
         this.cache.clear();
@@ -36,6 +54,26 @@ const DataLoader = {
     },
 
     loadPointIndex() {
+        // Use API if available
+        if (this.apiBase) {
+            return fetch(`${this.apiBase}/points`)
+                .then(r => {
+                    if (!r.ok) throw new Error("API points failed");
+                    return r.json();
+                })
+                .then(points => {
+                    this.pointIndex = points;
+                    this.pointIdToIndex = new Map();
+                    for (let i = 0; i < points.length; i++) {
+                        this.pointIdToIndex.set(points[i].point_id, i);
+                    }
+                    this.nPoints = points.length;
+                    this._valueBuffer = new Float32Array(this.nPoints);
+                    console.log(`Loaded ${this.nPoints} points via API`);
+                    return this.pointIndex;
+                });
+        }
+
         return new Promise((resolve, reject) => {
             const url = `${this.basePath}/points_index.csv`;
             Papa.parse(url, {
@@ -96,7 +134,26 @@ const DataLoader = {
         const parts = layerPath.split("/");
         const variable = parts.length > 1 ? parts[1] : parts[0];
 
-        // Try binary first
+        // Try API first if available
+        if (this.apiBase) {
+            const apiUrl = `${this.apiBase}/data/${variable}/${year}/${month}`;
+            try {
+                const resp = await fetch(apiUrl);
+                if (resp.ok) {
+                    if (generation !== this._loadGeneration) throw new Error("Request superseded");
+                    const buf = await resp.arrayBuffer();
+                    const parsed = this._parseBinary(buf);
+                    this._cacheSet(cacheKey, parsed);
+                    console.log(`Loaded ${variable} via API (${(buf.byteLength / 1048576).toFixed(1)} MB)`);
+                    return parsed;
+                }
+            } catch (e) {
+                if (e.message === "Request superseded") throw e;
+                // API failed, fall through to static files
+            }
+        }
+
+        // Try binary .bin file
         const binUrl = `${this.basePath}/${year}/${monthStr}/web/${variable}.bin`;
         try {
             const resp = await fetch(binUrl);

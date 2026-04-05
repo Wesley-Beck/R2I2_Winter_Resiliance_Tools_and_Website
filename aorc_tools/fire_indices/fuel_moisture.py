@@ -113,26 +113,32 @@ class NelsonFuelMoisture:
         """
         emc = equilibrium_moisture_content(temp_f, rh)
 
+        # Pre-compute precipitation mask once (not per timelag class)
+        if precip_mm is not None:
+            precip = np.asarray(precip_mm, dtype=np.float64)
+            rain_mask = precip > 0
+            has_rain = rain_mask.any()
+        else:
+            precip = None
+            rain_mask = None
+            has_rain = False
+
         for key, timelag in self.TIMELAGS.items():
             # Exponential approach to equilibrium
             rate = 1.0 - np.exp(-time_step_hr / timelag)
             self.state[key] += rate * (emc - self.state[key])
 
             # Rain wetting effect (simple addition proportional to precip)
-            if precip_mm is not None:
-                precip = np.asarray(precip_mm)
-                rain_mask = precip > 0
-                if rain_mask.any():
-                    # Wetting rate depends on timelag class
-                    wetting = precip * (1.0 - np.exp(-1.0 / timelag))
-                    self.state[key] = np.where(
-                        rain_mask,
-                        self.state[key] + wetting,
-                        self.state[key],
-                    )
+            if has_rain:
+                wetting = precip * (1.0 - np.exp(-1.0 / timelag))
+                self.state[key] = np.where(
+                    rain_mask,
+                    self.state[key] + wetting,
+                    self.state[key],
+                )
 
             # Clamp to physical range
-            self.state[key] = np.clip(self.state[key], 1.0, 250.0)
+            np.clip(self.state[key], 1.0, 250.0, out=self.state[key])
 
         return {k: v.copy() for k, v in self.state.items()}
 
