@@ -462,6 +462,38 @@ select.full-width {
     width: 100%;
 }
 
+/* --- Historical / Future Toggle --- */
+
+.mode-toggle {
+    display: flex;
+    gap: 0;
+    margin-bottom: 8px;
+    border-radius: 4px;
+    overflow: hidden;
+    border: 1px solid #5a3a20;
+}
+
+.mode-btn {
+    flex: 1;
+    padding: 6px 0;
+    border: none;
+    background: #2a1a10;
+    color: #a08060;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+.mode-btn:hover {
+    background: #3a2a18;
+}
+
+.mode-btn.active {
+    background: #6b3a1a;
+    color: #f0e0c8;
+}
+
 #source-panel .input-group {
     margin-bottom: 6px;
 }
@@ -476,8 +508,10 @@ select.full-width {
 }
 
 #source-summary {
+    font-size: 0.75rem;
     color: #a08060;
     line-height: 1.4;
+    margin-top: 4px;
 }
 
 /* --- Responsive --- */
