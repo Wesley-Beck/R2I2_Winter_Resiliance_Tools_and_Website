@@ -204,67 +204,131 @@ class AORCDataLoader:
         return lat_indices, lon_indices
 
     # ------------------------------------------------------------------
-    # Hourly Data Extraction
+    # Spatial Subsetting Helpers
     # ------------------------------------------------------------------
 
-    def get_hourly_data(self, year, month, day, hour, lat_bounds=None, lon_bounds=None):
-        """Extract one hour of AORC data for a geographic region.
-
-        Returns RAW AORC values — no unit conversions applied.
-        Units: TMP=K, SPFH=kg/kg, PRES=Pa, U/VGRD=m/s, APCP=mm, xSWRF=W/m².
-
-        Ported from existing aorc_data_loader.py with the double-conversion
-        issue fixed (conversions now handled by climate_convert.py).
-
-        Args:
-            year: Year (int).
-            month: Month (int, 1-12).
-            day: Day (int, 1-31).
-            hour: Hour (int, 0-23).
-            lat_bounds: Optional (lat_min, lat_max) tuple for subsetting.
-            lon_bounds: Optional (lon_min, lon_max) tuple for subsetting.
+    def _get_bbox_indices(self, lat_bounds, lon_bounds, year=2020):
+        """Get AORC grid index slices for a lat/lon bounding box.
 
         Returns:
-            dict: Variable name → 2D numpy array (lat × lon), raw AORC units.
+            (lat_slice, lon_slice, lat_offset, lon_offset): The slice objects
+            for subsetting and the starting index offsets for remapping.
+        """
+        lats, lons = self.get_coordinates(year)
+
+        # Find index range for latitude (AORC lats are ascending)
+        lat_mask = (lats >= lat_bounds[0]) & (lats <= lat_bounds[1])
+        lat_idxs = np.where(lat_mask)[0]
+        lat_start, lat_end = lat_idxs[0], lat_idxs[-1] + 1
+
+        # Find index range for longitude (AORC lons may be negative)
+        lon_mask = (lons >= lon_bounds[0]) & (lons <= lon_bounds[1])
+        lon_idxs = np.where(lon_mask)[0]
+        lon_start, lon_end = lon_idxs[0], lon_idxs[-1] + 1
+
+        return (
+            slice(lat_start, lat_end),
+            slice(lon_start, lon_end),
+            lat_start,
+            lon_start,
+        )
+
+    def remap_indices_to_bbox(self, lat_indices, lon_indices, lat_offset, lon_offset):
+        """Remap full-grid point indices to a spatial subset.
+
+        Args:
+            lat_indices: Point lat indices into the full AORC grid.
+            lon_indices: Point lon indices into the full AORC grid.
+            lat_offset: Starting lat index of the bbox subset.
+            lon_offset: Starting lon index of the bbox subset.
+
+        Returns:
+            (local_lat_idx, local_lon_idx): Indices into the bbox subset arrays.
+        """
+        return lat_indices - lat_offset, lon_indices - lon_offset
+
+    # ------------------------------------------------------------------
+    # Batch Data Extraction (optimized)
+    # ------------------------------------------------------------------
+
+    def get_daily_point_values(self, year, month, day, lat_indices, lon_indices,
+                               lat_bounds, lon_bounds):
+        """Extract a full day (24h) of AORC data at point locations.
+
+        Uses spatial subsetting to load only the bounding box region,
+        reducing data volume by ~350× compared to loading full CONUS.
+        Loads all 24 hours at once for the spatial subset.
+
+        Args:
+            year, month, day: Date components.
+            lat_indices: Array of latitude indices (full-grid).
+            lon_indices: Array of longitude indices (full-grid).
+            lat_bounds: (lat_min, lat_max) tuple.
+            lon_bounds: (lon_min, lon_max) tuple.
+
+        Returns:
+            dict: Variable name → 2D numpy array (24 hours × n_points),
+                  raw AORC units. Hour index 0 = 00:00 UTC.
+                  Also includes "hours" key → list of actual hour values.
         """
         import pandas as pd
 
         ds = self._open_dataset(year)
-        timestamp = pd.Timestamp(year, month, day, hour)
 
-        # Select the time step
-        hourly = ds.sel(time=timestamp, method="nearest")
+        # Spatial subset using isel (integer indexing, avoids coord lookup overhead)
+        lat_sl, lon_sl, lat_off, lon_off = self._get_bbox_indices(
+            lat_bounds, lon_bounds, year
+        )
+        local_lat, local_lon = self.remap_indices_to_bbox(
+            lat_indices, lon_indices, lat_off, lon_off
+        )
 
-        # Optionally subset by geographic bounds
-        if lat_bounds is not None:
-            hourly = hourly.sel(
-                latitude=slice(lat_bounds[0], lat_bounds[1])
-            )
-        if lon_bounds is not None:
-            hourly = hourly.sel(
-                longitude=slice(lon_bounds[0], lon_bounds[1])
-            )
+        # Time range for this day
+        start_ts = pd.Timestamp(year, month, day, 0)
+        end_ts = pd.Timestamp(year, month, day, 23)
 
-        # Extract raw values for each variable
-        result = {}
+        # Select spatial bbox and time range from the dataset
+        subset = ds.isel(latitude=lat_sl, longitude=lon_sl)
+        daily = subset.sel(time=slice(start_ts, end_ts))
+
+        # Get actual timestamps present
+        actual_times = pd.DatetimeIndex(daily.time.values)
+        n_hours = len(actual_times)
+        hours = [t.hour for t in actual_times]
+
+        result = {"hours": hours, "timestamps": actual_times}
+
         for var in self.VARIABLES:
-            if var in hourly:
-                result[var] = hourly[var].values
-            else:
-                logger.warning("Variable %s not found in AORC for %s", var, timestamp)
+            if var not in daily:
+                logger.warning("Variable %s not found for %s-%02d-%02d", var, year, month, day)
+                continue
+
+            # Load the full day's bbox data at once: shape (n_hours, n_lat, n_lon)
+            data = daily[var].values
+
+            # Extract point values for all hours at once
+            # data[:, local_lat, local_lon] → shape (n_hours, n_points)
+            result[var] = data[:, local_lat, local_lon]
 
         return result
 
-    def get_hourly_point_values(self, year, month, day, hour, lat_indices, lon_indices):
+    # ------------------------------------------------------------------
+    # Single-Hour Access (kept for backward compatibility / status checks)
+    # ------------------------------------------------------------------
+
+    def get_hourly_point_values(self, year, month, day, hour, lat_indices, lon_indices,
+                                lat_bounds=None, lon_bounds=None):
         """Extract one hour of AORC data at specific grid point indices.
 
-        Faster than get_hourly_data() for point-based extraction since it
-        uses .isel() instead of geographic subsetting.
+        If lat_bounds/lon_bounds are provided, uses spatial subsetting
+        for much faster extraction (~350× less data than full CONUS).
 
         Args:
             year, month, day, hour: Timestamp components.
             lat_indices: Array of latitude indices (from get_coordinate_indices).
             lon_indices: Array of longitude indices.
+            lat_bounds: Optional (lat_min, lat_max) for spatial subsetting.
+            lon_bounds: Optional (lon_min, lon_max) for spatial subsetting.
 
         Returns:
             dict: Variable name → 1D numpy array (one value per point), raw units.
@@ -274,15 +338,29 @@ class AORCDataLoader:
         ds = self._open_dataset(year)
         timestamp = pd.Timestamp(year, month, day, hour)
 
-        hourly = ds.sel(time=timestamp, method="nearest")
+        if lat_bounds is not None and lon_bounds is not None:
+            # Optimized path: spatial subsetting first
+            lat_sl, lon_sl, lat_off, lon_off = self._get_bbox_indices(
+                lat_bounds, lon_bounds, year
+            )
+            local_lat, local_lon = self.remap_indices_to_bbox(
+                lat_indices, lon_indices, lat_off, lon_off
+            )
+            subset = ds.isel(latitude=lat_sl, longitude=lon_sl)
+            hourly = subset.sel(time=timestamp, method="nearest")
 
-        result = {}
-        for var in self.VARIABLES:
-            if var in hourly:
-                data = hourly[var].values
-                # Extract values at each point index
-                result[var] = data[lat_indices, lon_indices]
-            else:
-                logger.warning("Variable %s not found for %s", var, timestamp)
-
-        return result
+            result = {}
+            for var in self.VARIABLES:
+                if var in hourly:
+                    data = hourly[var].values
+                    result[var] = data[local_lat, local_lon]
+            return result
+        else:
+            # Legacy path: loads full CONUS (slow)
+            hourly = ds.sel(time=timestamp, method="nearest")
+            result = {}
+            for var in self.VARIABLES:
+                if var in hourly:
+                    data = hourly[var].values
+                    result[var] = data[lat_indices, lon_indices]
+            return result

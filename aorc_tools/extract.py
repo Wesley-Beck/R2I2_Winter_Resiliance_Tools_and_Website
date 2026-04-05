@@ -94,6 +94,9 @@ def extract_month(year, month, points_df, output_base, loader=None,
     """Extract one month of hourly AORC data and compute all indices.
 
     Every intermediate step is saved as a separate CSV file.
+    Uses day-batch loading with spatial subsetting for performance:
+    loads only the WUP bounding box (~100K pixels) instead of full
+    CONUS (~35M pixels), and loads 24 hours at a time.
 
     Args:
         year: Year (int).
@@ -119,6 +122,16 @@ def extract_month(year, month, points_df, output_base, loader=None,
     lat_indices = points_df["lat_idx"].values
     lon_indices = points_df["lon_idx"].values
 
+    # Compute spatial bounding box from point locations (with small buffer)
+    lat_bounds = (
+        points_df["latitude"].min() - 0.05,
+        points_df["latitude"].max() + 0.05,
+    )
+    lon_bounds = (
+        points_df["longitude"].min() - 0.05,
+        points_df["longitude"].max() + 0.05,
+    )
+
     # Output directory structure
     month_dir = Path(output_base) / str(year) / f"{month:02d}"
 
@@ -138,96 +151,104 @@ def extract_month(year, month, points_df, output_base, loader=None,
         fm_model = None
 
     # Determine date range for this month
-    start_date = datetime(year, month, 1)
-    if month == 12:
-        end_date = datetime(year + 1, 1, 1)
-    else:
-        end_date = datetime(year, month + 1, 1)
+    import calendar
+    n_days = calendar.monthrange(year, month)[1]
 
-    total_hours = int((end_date - start_date).total_seconds() / 3600)
+    total_hours = n_days * 24
+    hours_processed = 0
 
-    # Hourly loop
-    for hour_idx in range(total_hours):
-        current = start_date + timedelta(hours=hour_idx)
-        doy = current.timetuple().tm_yday
+    # Day-batch loop: load 24 hours at a time with spatial subsetting
+    for day in range(1, n_days + 1):
+        if callback:
+            pct = 100.0 * hours_processed / total_hours
+            callback(pct, f"Loading {year}-{month:02d}-{day:02d}...")
 
-        if callback and hour_idx % 24 == 0:
-            pct = 100.0 * hour_idx / total_hours
-            callback(pct, f"Processing {current.strftime('%Y-%m-%d')}...")
-
-        # -----------------------------------------------------------------
-        # Fetch raw AORC data at point indices
-        # -----------------------------------------------------------------
+        # Load entire day's data for the WUP bbox
         try:
-            raw = loader.get_hourly_point_values(
-                current.year, current.month, current.day, current.hour,
-                lat_indices, lon_indices,
+            daily_data = loader.get_daily_point_values(
+                year, month, day, lat_indices, lon_indices,
+                lat_bounds, lon_bounds,
             )
         except Exception as e:
-            logger.error("Failed to fetch AORC data for %s: %s", current, e)
+            logger.error("Failed to fetch AORC day %s-%02d-%02d: %s",
+                         year, month, day, e)
+            hours_processed += 24
             continue
 
-        # Record raw AORC values
-        for var, values in raw.items():
-            raw_acc.add(var, current, values)
+        actual_hours = daily_data["hours"]
+        actual_timestamps = daily_data["timestamps"]
 
-        # -----------------------------------------------------------------
-        # Unit conversions (no double-conversion)
-        # -----------------------------------------------------------------
-        temp_k = raw.get("TMP_2maboveground", np.full(n_points, np.nan))
-        spfh = raw.get("SPFH_2maboveground", np.full(n_points, np.nan))
-        pres_pa = raw.get("PRES_surface", np.full(n_points, np.nan))
-        ugrd = raw.get("UGRD_10maboveground", np.full(n_points, np.nan))
-        vgrd = raw.get("VGRD_10maboveground", np.full(n_points, np.nan))
-        precip_mm = raw.get("APCP_surface", np.full(n_points, np.nan))
+        # Process each hour from the batch-loaded data
+        for h_idx, (hour_val, ts) in enumerate(zip(actual_hours, actual_timestamps)):
+            current = datetime(year, month, day, hour_val)
+            doy = current.timetuple().tm_yday
 
-        temp_c = kelvin_to_celsius(temp_k)
-        temp_f = celsius_to_fahrenheit(temp_c)
-        rh = specific_to_relative_humidity(spfh, temp_k, pres_pa)
-        ws_ms = wind_components_to_speed(ugrd, vgrd)
-        ws_kph = ms_to_kph(ws_ms)
-        ws_mph = ms_to_mph(ws_ms)
+            # Extract this hour's values from the batch (h_idx-th row)
+            raw = {}
+            for var in loader.VARIABLES:
+                if var in daily_data:
+                    raw[var] = daily_data[var][h_idx]
 
-        conv_acc.add("temperature_c", current, temp_c)
-        conv_acc.add("temperature_f", current, temp_f)
-        conv_acc.add("relative_humidity", current, rh)
-        conv_acc.add("wind_speed_ms", current, ws_ms)
-        conv_acc.add("wind_speed_kph", current, ws_kph)
-        conv_acc.add("wind_speed_mph", current, ws_mph)
-        conv_acc.add("precipitation_mm", current, precip_mm)
+            # Record raw AORC values
+            for var, values in raw.items():
+                raw_acc.add(var, current, values)
 
-        # -----------------------------------------------------------------
-        # Canadian FWI System (hourly)
-        # -----------------------------------------------------------------
-        fwi_result = fwi.update(temp_c, rh, ws_kph, precip_mm, doy, current.hour)
-        for key, values in fwi_result.items():
-            cfwi_acc.add(key, current, values)
+            # ---------------------------------------------------------
+            # Unit conversions
+            # ---------------------------------------------------------
+            temp_k = raw.get("TMP_2maboveground", np.full(n_points, np.nan))
+            spfh = raw.get("SPFH_2maboveground", np.full(n_points, np.nan))
+            pres_pa = raw.get("PRES_surface", np.full(n_points, np.nan))
+            ugrd = raw.get("UGRD_10maboveground", np.full(n_points, np.nan))
+            vgrd = raw.get("VGRD_10maboveground", np.full(n_points, np.nan))
+            precip_mm = raw.get("APCP_surface", np.full(n_points, np.nan))
 
-        # -----------------------------------------------------------------
-        # NFDRS: Fuel Moisture → ERC/SC/BI
-        # -----------------------------------------------------------------
-        if fuel_moisture_method == "nelson" and fm_model is not None:
-            fm = fm_model.update(temp_f, rh, precip_mm)
-        else:
-            fm = emc_fuel_moisture(temp_f, rh)
+            temp_c = kelvin_to_celsius(temp_k)
+            temp_f = celsius_to_fahrenheit(temp_c)
+            rh = specific_to_relative_humidity(spfh, temp_k, pres_pa)
+            ws_ms = wind_components_to_speed(ugrd, vgrd)
+            ws_kph = ms_to_kph(ws_ms)
+            ws_mph = ms_to_mph(ws_ms)
 
-        # Record fuel moisture intermediates
-        for key in ["fm1", "fm10", "fm100", "fm1000"]:
-            nfdrs_acc.add(key.upper(), current, fm[key])
+            conv_acc.add("temperature_c", current, temp_c)
+            conv_acc.add("temperature_f", current, temp_f)
+            conv_acc.add("relative_humidity", current, rh)
+            conv_acc.add("wind_speed_ms", current, ws_ms)
+            conv_acc.add("wind_speed_kph", current, ws_kph)
+            conv_acc.add("wind_speed_mph", current, ws_mph)
+            conv_acc.add("precipitation_mm", current, precip_mm)
 
-        # Default live fuel moisture (seasonal estimate)
-        # TODO: Replace with NDVI-derived values when available
-        mcherb = np.full(n_points, 120.0)  # Moderate green-up
-        mcwood = np.full(n_points, 100.0)
+            # ---------------------------------------------------------
+            # Canadian FWI System (hourly)
+            # ---------------------------------------------------------
+            fwi_result = fwi.update(temp_c, rh, ws_kph, precip_mm, doy, current.hour)
+            for key, values in fwi_result.items():
+                cfwi_acc.add(key, current, values)
 
-        nfdrs_result = compute_erc_bi(
-            fm["fm1"], fm["fm10"], fm["fm100"], fm["fm1000"],
-            mcherb, mcwood, ws_mph,
-            fuel_model=fuel_model,
-        )
+            # ---------------------------------------------------------
+            # NFDRS: Fuel Moisture → ERC/SC/BI
+            # ---------------------------------------------------------
+            if fuel_moisture_method == "nelson" and fm_model is not None:
+                fm = fm_model.update(temp_f, rh, precip_mm)
+            else:
+                fm = emc_fuel_moisture(temp_f, rh)
 
-        for key, values in nfdrs_result.items():
-            nfdrs_acc.add(key, current, values)
+            for key in ["fm1", "fm10", "fm100", "fm1000"]:
+                nfdrs_acc.add(key.upper(), current, fm[key])
+
+            mcherb = np.full(n_points, 120.0)
+            mcwood = np.full(n_points, 100.0)
+
+            nfdrs_result = compute_erc_bi(
+                fm["fm1"], fm["fm10"], fm["fm100"], fm["fm1000"],
+                mcherb, mcwood, ws_mph,
+                fuel_model=fuel_model,
+            )
+
+            for key, values in nfdrs_result.items():
+                nfdrs_acc.add(key, current, values)
+
+            hours_processed += 1
 
     # -----------------------------------------------------------------
     # Save all CSVs
