@@ -48,33 +48,6 @@ body {
     margin-left: 4px;
 }
 
-.header-tabs {
-    display: flex;
-    gap: 2px;
-}
-
-.tab-btn {
-    background: #3a2010;
-    color: #c4a882;
-    border: 1px solid #5c3a20;
-    border-bottom: none;
-    padding: 4px 16px;
-    font-size: 0.8rem;
-    cursor: pointer;
-    border-radius: 4px 4px 0 0;
-    transition: background 0.2s;
-}
-
-.tab-btn:hover {
-    background: #5c3a20;
-}
-
-.tab-btn.active {
-    background: #c87533;
-    color: #1a1a1a;
-    font-weight: 600;
-}
-
 .header-status {
     font-size: 0.75rem;
     color: #a08060;
@@ -708,20 +681,7 @@ select.layer-select option:disabled {
 }
 
 /* =============================================================================
-   Tab Content
-   ============================================================================= */
-
-.tab-content {
-    flex: 1;
-    overflow: hidden;
-}
-
-.tab-content:not(.active) {
-    display: none;
-}
-
-/* =============================================================================
-   Reference Tab — FDI Dataset Capability Table
+   Reference Page — FDI Dataset Capability Table
    ============================================================================= */
 
 .reference-container {
@@ -901,4 +861,57 @@ select.layer-select option:disabled {
 
 .reference-notes li strong {
     color: #e8d5c4;
+}
+
+.reference-list li {
+    margin-bottom: 6px;
+    text-indent: -1em;
+    padding-left: 1em;
+}
+
+/* --- Publication-quality figure blocks --- */
+
+.figure-block {
+    margin-bottom: 32px;
+    padding: 20px;
+    background: #1e1410;
+    border: 1px solid #3a2010;
+    border-radius: 6px;
+}
+
+.figure-title {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: #f0c27a;
+    margin-bottom: 8px;
+}
+
+.figure-caption {
+    font-size: 0.78rem;
+    color: #c4a882;
+    line-height: 1.6;
+    margin-bottom: 16px;
+    text-align: justify;
+}
+
+.figure-footnote {
+    margin-top: 10px;
+    font-size: 0.7rem;
+    color: #8a7060;
+    line-height: 1.5;
+    border-top: 1px solid #3a2010;
+    padding-top: 8px;
+}
+
+/* AORC source timeline table */
+.aorc-source-table td:first-child {
+    white-space: nowrap;
+    font-weight: 600;
+}
+
+/* FDI requirements table */
+.fdi-req-table td:first-child {
+    white-space: nowrap;
+    font-weight: 600;
+    color: #f0c27a;
 }

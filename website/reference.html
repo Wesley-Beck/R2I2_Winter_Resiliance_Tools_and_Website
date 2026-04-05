@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FDI Dataset Reference — WUP Wildfire Risk</title>
+    <link rel="stylesheet" href="css/style.css" />
+    <style>
+        body { overflow: auto; height: auto; }
+        #app { height: auto; }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <header id="top-bar">
+            <div class="header-title">
+                <h1>WUP Wildfire Risk — Dataset Reference</h1>
+                <span class="subtitle">Fire Danger Index Capability Matrix</span>
+            </div>
+            <div class="header-status">
+                <a href="index.html" style="color: #c87533; text-decoration: none;">Back to Explorer</a>
+            </div>
+        </header>
+
+        <div class="reference-container">
+
+            <!-- ============================================================ -->
+            <!-- TABLE 1: Dataset Capabilities (publication figure)           -->
+            <!-- ============================================================ -->
+
+            <div class="figure-block">
+                <div class="figure-title">
+                    Table 1. Climate Dataset Variable Availability and Fire Danger Index Capability
+                </div>
+                <p class="figure-caption">
+                    Summary of 16 climate datasets evaluated for wildfire risk analysis in the Western Upper Peninsula
+                    of Michigan. Variable availability determines which Fire Danger Index (FDI) systems each dataset
+                    can support. The Canadian Fire Weather Index (FWI) and National Fire-Danger Rating System (NFDRS)
+                    require temperature, relative humidity, wind speed, and precipitation. The Fire Potential Index
+                    (FPI) requires only temperature and relative humidity. Datasets are grouped by type: reanalysis
+                    products, station-interpolated gridded observations, radar/satellite-derived products, and
+                    climate model projections.
+                </p>
+
+                <div class="table-filter-bar">
+                    <label>Filter: </label>
+                    <select id="ref-filter-category">
+                        <option value="all">All Datasets</option>
+                        <option value="reanalysis">Reanalysis</option>
+                        <option value="gridded">Gridded Observations</option>
+                        <option value="radar">Radar / Satellite</option>
+                        <option value="projection">Projections</option>
+                    </select>
+                    <select id="ref-filter-fdi">
+                        <option value="all">All FDI Support</option>
+                        <option value="cfwi">Can Compute FWI</option>
+                        <option value="nfdrs">Can Compute NFDRS</option>
+                        <option value="fpi">Can Compute FPI</option>
+                        <option value="none">No FDI Support</option>
+                    </select>
+                </div>
+
+                <div class="table-scroll">
+                    <table id="fdi-capability-table" class="reference-table">
+                        <thead>
+                            <tr>
+                                <th rowspan="2">Dataset</th>
+                                <th rowspan="2">Type</th>
+                                <th rowspan="2">Spatial</th>
+                                <th rowspan="2">Temporal</th>
+                                <th rowspan="2">Period</th>
+                                <th colspan="6" class="th-group">Climate Variables</th>
+                                <th colspan="3" class="th-group">FDI Capability</th>
+                            </tr>
+                            <tr>
+                                <th class="var-col">T</th>
+                                <th class="var-col">RH</th>
+                                <th class="var-col">W</th>
+                                <th class="var-col">P</th>
+                                <th class="var-col">R</th>
+                                <th class="var-col">SP</th>
+                                <th class="fdi-col">FWI</th>
+                                <th class="fdi-col">NFDRS</th>
+                                <th class="fdi-col">FPI</th>
+                            </tr>
+                        </thead>
+                        <tbody id="fdi-table-body">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="figure-footnote">
+                    T = Temperature; RH = Relative Humidity (or derivable from dewpoint/vapor pressure);
+                    W = Wind Speed; P = Precipitation; R = Radiation (SW/LW); SP = Surface Pressure.
+                    FWI = Canadian Fire Weather Index System (Van Wagner 1987);
+                    NFDRS = National Fire-Danger Rating System (Bradshaw et al. 1984);
+                    FPI = Fire Potential Index (Burgan et al. 1998).
+                </div>
+            </div>
+
+            <!-- ============================================================ -->
+            <!-- TABLE 2: AORC-style variable source timeline                 -->
+            <!-- ============================================================ -->
+
+            <div class="figure-block">
+                <div class="figure-title">
+                    Table 2. AORC v1.1 Input Data Sources by Variable and Time Period
+                </div>
+                <p class="figure-caption">
+                    The NOAA Analysis of Record for Calibration (AORC) v1.1 dataset integrates observations from
+                    multiple sources that change over the 1979&ndash;present record. Precipitation sources transition
+                    from satellite-based estimates to gauge-calibrated NEXRAD radar. Non-precipitation forcing
+                    transitions from global reanalysis (GDAS/MERRA-2) to high-resolution mesoscale analysis (URMA).
+                    After Fall et al. (2023).
+                </p>
+
+                <div class="table-scroll">
+                    <table class="reference-table aorc-source-table">
+                        <thead>
+                            <tr>
+                                <th>Period</th>
+                                <th>Precipitation Source</th>
+                                <th>Non-Precip Forcing</th>
+                                <th>Resolution</th>
+                                <th>Notes</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td class="cell-name">1979 &ndash; 1994</td>
+                                <td>Stage II + CMORPH satellite QPE</td>
+                                <td>GDAS / MERRA-2 reanalysis</td>
+                                <td>~800 m</td>
+                                <td>Pre-NEXRAD era. Satellite-derived precipitation estimates.</td>
+                            </tr>
+                            <tr>
+                                <td class="cell-name">1995 &ndash; 2001</td>
+                                <td>NEXRAD Stage II hourly</td>
+                                <td>GDAS / MERRA-2 reanalysis</td>
+                                <td>~800 m</td>
+                                <td>Early NEXRAD deployment. Stage II radar precipitation.</td>
+                            </tr>
+                            <tr>
+                                <td class="cell-name">2002 &ndash; 2015</td>
+                                <td>Stage IV gauge-calibrated NEXRAD</td>
+                                <td>GDAS / MERRA-2 reanalysis</td>
+                                <td>~800 m</td>
+                                <td>High-quality radar+gauge blend. RFC mosaicked product.</td>
+                            </tr>
+                            <tr>
+                                <td class="cell-name">2016 &ndash; 2017</td>
+                                <td>Stage IV gauge-calibrated NEXRAD</td>
+                                <td>NLDAS-2 to URMA transition</td>
+                                <td>~800 m</td>
+                                <td>Transition period. Non-precip forcing migrates to URMA.</td>
+                            </tr>
+                            <tr>
+                                <td class="cell-name">2018 &ndash; present</td>
+                                <td>Stage IV gauge-calibrated NEXRAD</td>
+                                <td>URMA reanalysis (2.5 km)</td>
+                                <td>~800 m</td>
+                                <td>Current era. Highest quality forcing from mesoscale analysis.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="figure-footnote">
+                    AORC = Analysis of Record for Calibration; QPE = Quantitative Precipitation Estimate;
+                    NEXRAD = Next-Generation Radar; GDAS = Global Data Assimilation System;
+                    MERRA-2 = Modern-Era Retrospective analysis for Research and Applications;
+                    URMA = UnRestricted Mesoscale Analysis; RFC = River Forecast Center.
+                    Source: Fall et al. (2023), JAWRA.
+                </div>
+            </div>
+
+            <!-- ============================================================ -->
+            <!-- TABLE 3: FDI Variable Requirements                           -->
+            <!-- ============================================================ -->
+
+            <div class="figure-block">
+                <div class="figure-title">
+                    Table 3. Fire Danger Index System Variable Requirements
+                </div>
+                <p class="figure-caption">
+                    Minimum input variables required by each Fire Danger Index system implemented in this study.
+                    Additional variables (e.g., radiation, fuel type) improve accuracy but are not strictly required.
+                </p>
+
+                <div class="table-scroll">
+                    <table class="reference-table fdi-req-table">
+                        <thead>
+                            <tr>
+                                <th>FDI System</th>
+                                <th>Required Variables</th>
+                                <th>Optional / Improves</th>
+                                <th>Output Indices</th>
+                                <th>Reference</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td class="cell-name">Canadian FWI</td>
+                                <td>Temperature, Relative Humidity, Wind Speed, Precipitation</td>
+                                <td>Day length (latitude-derived)</td>
+                                <td>FFMC, DMC, DC, ISI, BUI, FWI</td>
+                                <td>Van Wagner (1987)</td>
+                            </tr>
+                            <tr>
+                                <td class="cell-name">NFDRS</td>
+                                <td>Temperature, Relative Humidity, Wind Speed, Precipitation</td>
+                                <td>Radiation (SW/LW), fuel model, slope, aspect</td>
+                                <td>FM1, FM10, FM100, FM1000, SC, ERC, BI</td>
+                                <td>Bradshaw et al. (1984)</td>
+                            </tr>
+                            <tr>
+                                <td class="cell-name">FPI</td>
+                                <td>Temperature, Relative Humidity</td>
+                                <td>NDVI / greenness (seasonal proxy used)</td>
+                                <td>EMC, Relative Greenness, FPI</td>
+                                <td>Burgan et al. (1998)</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="figure-footnote">
+                    FFMC = Fine Fuel Moisture Code; DMC = Duff Moisture Code; DC = Drought Code;
+                    ISI = Initial Spread Index; BUI = Buildup Index; FWI = Fire Weather Index;
+                    FM = Fuel Moisture; SC = Spread Component; ERC = Energy Release Component;
+                    BI = Burning Index; EMC = Equilibrium Moisture Content; NDVI = Normalized
+                    Difference Vegetation Index.
+                </div>
+            </div>
+
+            <!-- ============================================================ -->
+            <!-- Data Sources & Access                                        -->
+            <!-- ============================================================ -->
+
+            <div class="reference-notes">
+                <h3>Data Access</h3>
+                <ul>
+                    <li><strong>AORC v1.1</strong>: <code>s3://noaa-nws-aorc-v1-1-1km</code> (Zarr, open access via AWS NODD)</li>
+                    <li><strong>ERA5 / ERA5-Land</strong>: <code>s3://era5-pds</code> (AWS) or Copernicus Climate Data Store API</li>
+                    <li><strong>HRRR</strong>: <code>s3://noaa-hrrr-bdp-pds</code> (GRIB2) or <code>s3://hrrrzarr</code> (Zarr)</li>
+                    <li><strong>Daymet v4</strong>: <code>s3://daymet-v4-na</code> (AWS Open Data) or ORNL DAAC THREDDS</li>
+                    <li><strong>GridMET</strong>: Climatology Lab HTTP download or Google Earth Engine</li>
+                    <li><strong>NEX-GDDP-CMIP6</strong>: <code>s3://nex-gddp-cmip6</code> (NASA, 27 GCMs, SSP2-4.5 / SSP5-8.5)</li>
+                    <li><strong>ClimRR</strong>: Argonne National Laboratory ArcGIS Feature Service or download portal</li>
+                    <li><strong>GLARM</strong>: Michigan Technological University GLARM project data portal</li>
+                </ul>
+            </div>
+
+            <div class="reference-notes" style="margin-top: 16px;">
+                <h3>References</h3>
+                <ul class="reference-list">
+                    <li>Bradshaw, L.S., Deeming, J.E., Burgan, R.E., Cohen, J.D. (1984). The 1978 National Fire-Danger Rating System: Technical Documentation. USDA Forest Service Gen. Tech. Rep. INT-169.</li>
+                    <li>Burgan, R.E., Klaver, R.W., Klaver, J.M. (1998). Fuel models and fire potential from satellite and surface observations. Int. J. Wildland Fire, 8(3), 159-170.</li>
+                    <li>Fall, S., et al. (2023). The Analysis of Record for Calibration (AORC): A multi-decadal meteorological dataset for hydrologic modeling. J. American Water Resources Association.</li>
+                    <li>Hersbach, H., et al. (2020). The ERA5 global reanalysis. Q. J. R. Meteorol. Soc., 146(730), 1999-2049.</li>
+                    <li>Thrasher, B., et al. (2022). NASA Global Daily Downscaled Projections, CMIP6. Scientific Data, 9(1), 262.</li>
+                    <li>Van Wagner, C.E. (1987). Development and Structure of the Canadian Forest Fire Weather Index System. Forestry Technical Report 35, Canadian Forestry Service.</li>
+                    <li>Xue, P., et al. (2022). Climate projections over the Great Lakes Region: using two-way coupling of a regional climate model with a 3-D lake model. Geoscientific Model Development, 15(11), 4425-4446.</li>
+                </ul>
+            </div>
+
+        </div>
+    </div>
+
+    <script src="js/reference-table.js"></script>
+</body>
+</html>
