@@ -198,6 +198,98 @@ def sync(points_file, mirror_dir):
     click.echo(f"Synced {count} new months")
 
 
+@main.command(name="run-all")
+@click.option("--points", "points_file", required=True, help="Path to points_index.csv")
+@click.option("--mirror-dir", required=True, help="Local AORC mirror directory")
+@click.option("--output", default="./data/output", help="Base output directory")
+@click.option("--start-year", default=1979, type=int, help="Start year (default: 1979)")
+@click.option("--end-year", default=None, type=int, help="End year (default: current year)")
+@click.option("--fuel-model", default="G", help="NFDRS fuel model code")
+@click.option("--format", "output_format", default="sqlite",
+              type=click.Choice(["sqlite", "csv", "both"]),
+              help="Output format (default: sqlite)")
+@click.option("--skip-raw/--no-skip-raw", default=True,
+              help="Skip raw AORC output (default: yes, saves space)")
+@click.option("--download-first/--no-download-first", default=True,
+              help="Download missing months before extraction")
+def run_all(points_file, mirror_dir, output, start_year, end_year,
+            fuel_model, output_format, skip_raw, download_first):
+    """Download AORC data and compute fire indices for the entire timeline.
+
+    This is the all-in-one command. It:
+    1. Downloads any missing months from S3 to the local mirror
+    2. Extracts fire indices year-by-year from local data
+    3. Carries forward FWI/NFDRS state across months for continuity
+
+    Example: Process the full AORC archive (1979-present):
+        aorc-tools run-all --points data/output/points_index.csv --mirror-dir ./data/aorc_local
+
+    Example: Process just fire seasons (May-Oct) for recent years:
+        aorc-tools run-all --points data/output/points_index.csv --mirror-dir ./data/aorc_local \\
+            --start-year 2015 --end-year 2024
+    """
+    import time
+    from datetime import datetime as dt
+    from aorc_tools.point_filter import load_point_index
+    from aorc_tools.local_mirror import LocalAORCMirror
+    from aorc_tools.extract import extract_year
+
+    if end_year is None:
+        end_year = dt.utcnow().year
+
+    points_df = load_point_index(points_file)
+    click.echo(f"Loaded {len(points_df)} points")
+
+    mirror = LocalAORCMirror(mirror_dir, points_df)
+    status_info = mirror.status()
+    click.echo(f"Local mirror: {status_info['months_downloaded']} months cached "
+               f"({status_info['total_size_gb']} GB)")
+
+    total_years = end_year - start_year + 1
+    total_months = total_years * 12
+
+    # Step 1: Download missing months
+    if download_first:
+        click.echo(f"\n=== Step 1: Downloading AORC data ({start_year}-{end_year}) ===")
+        def dl_progress(year, month, msg):
+            click.echo(f"  {year}-{month:02d}: {msg}")
+
+        downloaded = mirror.download_range(start_year, end_year, callback=dl_progress)
+        click.echo(f"Downloaded {downloaded} new months")
+    else:
+        click.echo("\nSkipping download (--no-download-first)")
+
+    # Step 2: Extract fire indices year by year
+    click.echo(f"\n=== Step 2: Computing fire indices ({start_year}-{end_year}) ===")
+    t_total = time.perf_counter()
+    state = {"fwi_state": None, "fm_state": None}
+
+    for yr_idx, year in enumerate(range(start_year, end_year + 1)):
+        click.echo(f"\n--- Year {year} ({yr_idx + 1}/{total_years}) ---")
+        t_year = time.perf_counter()
+
+        def progress(pct, msg):
+            click.echo(f"  [{pct:5.1f}%] {msg}")
+
+        state = extract_year(
+            year, points_df, output,
+            fuel_model=fuel_model,
+            output_format=output_format,
+            skip_raw=skip_raw,
+            mirror=mirror,
+            fwi_state=state["fwi_state"],
+            fm_state=state["fm_state"],
+            callback=progress,
+        )
+
+        elapsed = time.perf_counter() - t_year
+        click.echo(f"  Year {year} complete in {elapsed:.0f}s")
+
+    total_time = time.perf_counter() - t_total
+    click.echo(f"\n=== All done! {total_years} years processed in {total_time:.0f}s ===")
+    click.echo(f"Output: {output}")
+
+
 @main.command()
 def status():
     """Check AORC S3 connection and system status."""
