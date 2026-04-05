@@ -105,7 +105,7 @@ const DataLoader = {
                     resolve(parsed);
                 },
                 error: (err) => {
-                    reject(new Error(`Failed to load ${url}: ${err.message}`));
+                    reject(new Error(`No data available for this period`));
                 },
             });
         });

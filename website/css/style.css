@@ -301,6 +301,21 @@ input[type="range"] {
     background: #c87533;
 }
 
+/* --- Checkbox styling --- */
+
+input[type="checkbox"] {
+    accent-color: #c87533;
+    margin-right: 6px;
+    vertical-align: middle;
+}
+
+#wildfire-panel label {
+    font-size: 0.8rem;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+}
+
 /* --- Responsive --- */
 
 @media (max-width: 768px) {

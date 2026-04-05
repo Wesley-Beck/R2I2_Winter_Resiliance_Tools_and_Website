@@ -1,17 +1,32 @@
 /**
- * UI controls — wires up layer selectors, time slider, and legend.
+ * UI controls — wires up layer selectors, time navigation, and legend.
+ * Supports full AORC timeline (1979-2024) with year/month/day/hour controls.
  */
 
 const UIControls = {
     currentLayerPath: null,
     currentYear: 2020,
     currentMonth: 7,
+    currentDay: 15,
     currentHour: 12,
 
     /**
      * Initialize all UI event listeners.
      */
     init() {
+        // Populate year dropdown (1979-2024)
+        const yearSelect = document.getElementById("year-select");
+        for (let y = 2024; y >= 1979; y--) {
+            const opt = document.createElement("option");
+            opt.value = y;
+            opt.textContent = y;
+            if (y === this.currentYear) opt.selected = true;
+            yearSelect.appendChild(opt);
+        }
+
+        // Populate day dropdown (1-31, adjusted per month)
+        this._populateDays();
+
         // Layer selectors — only one group can be active at a time
         const selects = document.querySelectorAll(".layer-select");
         selects.forEach(select => {
@@ -29,12 +44,25 @@ const UIControls = {
             });
         });
 
-        // Date picker
-        document.getElementById("date-picker").addEventListener("change", (e) => {
-            const parts = e.target.value.split("-");
-            this.currentYear = parseInt(parts[0]);
-            this.currentMonth = parseInt(parts[1]);
+        // Year selector
+        yearSelect.addEventListener("change", (e) => {
+            this.currentYear = parseInt(e.target.value);
+            this._populateDays();
             this._loadAndDisplay();
+        });
+
+        // Month selector
+        document.getElementById("month-select").addEventListener("change", (e) => {
+            this.currentMonth = parseInt(e.target.value);
+            this._populateDays();
+            this._loadAndDisplay();
+        });
+
+        // Day selector
+        document.getElementById("day-select").addEventListener("change", (e) => {
+            this.currentDay = parseInt(e.target.value);
+            this._updateTimeDisplay();
+            this._displayCurrentTimestamp();
         });
 
         // Hour slider
@@ -53,6 +81,15 @@ const UIControls = {
             App.loadPoints();
         });
 
+        // Wildfire overlay toggle
+        document.getElementById("wildfire-toggle").addEventListener("change", (e) => {
+            if (e.target.checked) {
+                WildfireOverlay.load(this.currentYear);
+            } else {
+                WildfireOverlay.hide();
+            }
+        });
+
         // Set initial time display
         this._updateTimeDisplay();
 
@@ -61,12 +98,35 @@ const UIControls = {
     },
 
     /**
+     * Populate the day dropdown based on current year/month.
+     */
+    _populateDays() {
+        const daySelect = document.getElementById("day-select");
+        const daysInMonth = new Date(this.currentYear, this.currentMonth, 0).getDate();
+
+        // Preserve current day if valid
+        const prevDay = this.currentDay;
+        daySelect.innerHTML = "";
+
+        for (let d = 1; d <= daysInMonth; d++) {
+            const opt = document.createElement("option");
+            opt.value = d;
+            opt.textContent = d;
+            daySelect.appendChild(opt);
+        }
+
+        this.currentDay = Math.min(prevDay, daysInMonth);
+        daySelect.value = this.currentDay;
+        this._updateTimeDisplay();
+    },
+
+    /**
      * Get the current timestamp string.
      */
     getCurrentTimestamp() {
         const y = this.currentYear;
         const m = String(this.currentMonth).padStart(2, "0");
-        const d = document.getElementById("date-picker").value.split("-")[2] || "15";
+        const d = String(this.currentDay).padStart(2, "0");
         const h = String(this.currentHour).padStart(2, "0");
         return `${y}-${m}-${d} ${h}:00`;
     },
@@ -100,12 +160,17 @@ const UIControls = {
             this._updateProvenance();
             status.textContent = "Ready";
         } catch (err) {
-            console.error("Load error:", err);
-            status.textContent = `Error: ${err.message}`;
+            console.warn("Load error:", err.message);
+            status.textContent = `No data for ${this.currentYear}-${String(this.currentMonth).padStart(2, "0")}`;
             MapLayer.resetColors();
         }
 
         MapLayer.hideLoading();
+
+        // Reload wildfire perimeters if toggled on and year changed
+        if (document.getElementById("wildfire-toggle").checked) {
+            WildfireOverlay.load(this.currentYear);
+        }
     },
 
     /**

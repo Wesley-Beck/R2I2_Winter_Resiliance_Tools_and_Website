@@ -6,8 +6,9 @@ dist/
 build/
 *.egg
 
-# Data (large files, not tracked)
-data/output/
+# Data (large extracted CSVs, not tracked)
+data/output/*/
+!data/output/points_index.csv
 data/shapefiles/*.shp
 data/shapefiles/*.dbf
 data/shapefiles/*.shx
