@@ -1,0 +1,17 @@
+Dataset,Dataset Key,Category,Spatial Resolution,Temporal Resolution,Period,Temperature,Relative Humidity,Wind Speed,Precipitation,Radiation,Pressure,Canadian FWI,NFDRS,FPI,Notes
+NOAA AORC v1.1,aorc,Reanalysis,~800m,Hourly,1979-present,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Primary dataset. Full variable suite from NOAA reanalysis.
+NLDAS-2 (NASA),nldas2,Reanalysis,12km,Hourly,1979-present,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,NASA gauge-corrected land-surface forcing blend.
+ERA5 (ECMWF),era5,Reanalysis,31km,Hourly,1940-present,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,ECMWF global reanalysis. 200+ variables. Longest record.
+ERA5-Land (ECMWF),era5land,Reanalysis,9km,Hourly,1950-present,Yes,Yes (dewpoint),Yes,Yes,No,No,Yes,Yes,Yes,Dewpoint converted to RH. Higher resolution than ERA5.
+NARR (NCEP),narr,Reanalysis,32km,3-hourly,1979-2024,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Discontinued 2024. 3-hourly temporal resolution.
+HRRR (NOAA),hrrr,Reanalysis/NWP,3km,Hourly,2014-present,Yes,Yes,Yes,Yes,Yes,No,Yes,Yes,Yes,High-resolution rapid refresh NWP with radar assimilation.
+RTMA/URMA (NOAA),rtma,Reanalysis,2.5km,Hourly,2011-present,Yes,Yes (dewpoint),Yes,Yes,No,Yes,Yes,Yes,Yes,Mesoscale analysis. Dewpoint converted to RH.
+PRISM (Oregon State),prism,Gridded Obs,800m,Daily,1895-present,Yes,Yes (dewpoint),No,Yes,No,No,No,No,Yes,High-res station interpolation. No wind data.
+Daymet v4 (ORNL),daymet,Gridded Obs,1km,Daily,1980-present,Yes,Yes (vapor pressure),No,Yes,Yes,No,No,No,Yes,Vapor pressure convertible to RH. No wind data.
+GridMET (Climatology Lab),gridmet,Gridded Obs,4km,Daily,1979-present,Yes,Yes,Yes,Yes,Yes,No,Yes,Yes,Yes,Includes pre-computed fire indices (ERC BI FM100).
+Livneh (USGS/NCAR),livneh,Gridded Obs,6km,Daily,1915-2015,Yes,No,Yes,Yes,No,No,No,No,No,No humidity variable. Static dataset ending 2015.
+MRMS (NOAA),mrms,Radar/Satellite,1km,2-minute,2014-present,No,No,No,Yes,No,No,No,No,No,Precipitation only. Radar + gauge blend.
+CPC Unified (NOAA),cpc,Gridded Obs,25km,Daily,1948-present,Yes,No,No,Yes,No,No,No,No,No,Temperature + precipitation only. No wind or humidity.
+NEX-GDDP-CMIP6 (NASA),nex-gddp,Projection (BCSD),25km,Daily,2015-2100,Yes,Yes,Yes,Yes,No,No,Yes,Yes,Yes,27 GCMs. SSP2-4.5 and SSP5-8.5 scenarios.
+ClimRR (Argonne),climrr,Projection (WRF),12km,Daily,1995-2094,Yes,Yes,Yes,Yes,No,No,Yes,Yes,Yes,CESM2 dynamically downscaled via WRF.
+GLARM (Michigan Tech),glarm,Projection (RegCM4),18km,Daily,1981-2099,Yes,Yes,Yes,Yes,Yes,No,Yes,Yes,Yes,RegCM4 ensemble. RCP 4.5 and 8.5 scenarios.

@@ -48,6 +48,33 @@ body {
     margin-left: 4px;
 }
 
+.header-tabs {
+    display: flex;
+    gap: 2px;
+}
+
+.tab-btn {
+    background: #3a2010;
+    color: #c4a882;
+    border: 1px solid #5c3a20;
+    border-bottom: none;
+    padding: 4px 16px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    border-radius: 4px 4px 0 0;
+    transition: background 0.2s;
+}
+
+.tab-btn:hover {
+    background: #5c3a20;
+}
+
+.tab-btn.active {
+    background: #c87533;
+    color: #1a1a1a;
+    font-weight: 600;
+}
+
 .header-status {
     font-size: 0.75rem;
     color: #a08060;
@@ -678,4 +705,200 @@ select.layer-select option:disabled {
         border-right: none;
         border-bottom: 1px solid #5c3a20;
     }
+}
+
+/* =============================================================================
+   Tab Content
+   ============================================================================= */
+
+.tab-content {
+    flex: 1;
+    overflow: hidden;
+}
+
+.tab-content:not(.active) {
+    display: none;
+}
+
+/* =============================================================================
+   Reference Tab — FDI Dataset Capability Table
+   ============================================================================= */
+
+.reference-container {
+    padding: 24px 32px;
+    max-width: 1400px;
+    margin: 0 auto;
+    overflow-y: auto;
+    height: calc(100vh - 50px);
+}
+
+.reference-header h2 {
+    font-size: 1.4rem;
+    color: #f0c27a;
+    margin-bottom: 8px;
+}
+
+.reference-intro {
+    font-size: 0.85rem;
+    color: #c4a882;
+    margin-bottom: 16px;
+    line-height: 1.5;
+}
+
+.fdi-req-legend {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+    padding: 10px 14px;
+    background: #2a1a0e;
+    border: 1px solid #5c3a20;
+    border-radius: 6px;
+}
+
+.fdi-req-item {
+    font-size: 0.78rem;
+    color: #c4a882;
+}
+
+.fdi-req-item strong {
+    color: #f0c27a;
+}
+
+/* Filter bar */
+
+.table-filter-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    font-size: 0.8rem;
+}
+
+.table-filter-bar label {
+    color: #a08060;
+}
+
+.table-filter-bar select {
+    background: #2a1a0e;
+    color: #e8d5c4;
+    border: 1px solid #5c3a20;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.78rem;
+}
+
+/* Table */
+
+.table-scroll {
+    overflow-x: auto;
+    margin-bottom: 24px;
+}
+
+.reference-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.78rem;
+    white-space: nowrap;
+}
+
+.reference-table th {
+    background: #3a2010;
+    color: #f0c27a;
+    padding: 6px 10px;
+    text-align: left;
+    border: 1px solid #5c3a20;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+}
+
+.reference-table th.th-group {
+    text-align: center;
+    background: #4a2c17;
+    letter-spacing: 0.5px;
+}
+
+.reference-table th.var-col,
+.reference-table th.fdi-col {
+    text-align: center;
+    font-size: 0.72rem;
+    padding: 4px 6px;
+}
+
+.reference-table td {
+    padding: 5px 10px;
+    border: 1px solid #3a2010;
+}
+
+.reference-table tr:nth-child(even) {
+    background: #1e1410;
+}
+
+.reference-table tr:hover {
+    background: #2a1a0e;
+}
+
+.cell-name {
+    font-weight: 600;
+    color: #e8d5c4;
+}
+
+.cell-cat {
+    color: #a08060;
+    font-size: 0.72rem;
+}
+
+/* Variable availability cells */
+
+.cell-yes {
+    text-align: center;
+    color: #80d090;
+    font-weight: bold;
+}
+
+.cell-no {
+    text-align: center;
+    color: #6a4040;
+}
+
+/* FDI capability cells */
+
+.cell-fdi-yes {
+    text-align: center;
+    color: #1a1a1a;
+    background: #4a9a5a;
+    font-weight: bold;
+}
+
+.cell-fdi-no {
+    text-align: center;
+    color: #6a4040;
+}
+
+/* Notes section */
+
+.reference-notes {
+    margin-top: 16px;
+    padding: 16px;
+    background: #2a1a0e;
+    border: 1px solid #5c3a20;
+    border-radius: 6px;
+}
+
+.reference-notes h3 {
+    font-size: 0.9rem;
+    color: #f0c27a;
+    margin-bottom: 8px;
+}
+
+.reference-notes ul {
+    padding-left: 20px;
+    font-size: 0.78rem;
+    color: #c4a882;
+    line-height: 1.6;
+}
+
+.reference-notes li strong {
+    color: #e8d5c4;
 }
