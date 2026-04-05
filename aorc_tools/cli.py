@@ -313,11 +313,7 @@ def status():
 @click.option("--scenario", default="rcp85", type=click.Choice(["rcp45", "rcp85"]),
               help="Emission scenario")
 def glarm_info(data_path, scenario):
-    """Show GLARM climate model adapter status and available variables.
-
-    Reports which fire weather variables GLARM provides and which
-    are missing. Missing variables will produce NaN fire indices.
-    """
+    """Show GLARM climate model adapter status and available variables."""
     from aorc_tools.climate_model_adapter import GLARMAdapter, REQUIRED_VARIABLES
 
     if data_path:
@@ -329,33 +325,171 @@ def glarm_info(data_path, scenario):
         click.echo(f"Source:  https://digitalcommons.mtu.edu/glts/")
         click.echo(f"Period:  1981-2099 (RCP 4.5 & RCP 8.5)")
         click.echo(f"Grid:    18 km (atmospheric), 1-4 km (lake)")
-        click.echo()
-        click.echo("Expected variables:")
         adapter = GLARMAdapter("/tmp/placeholder", scenario=scenario)
 
     info = adapter.info()
     click.echo(f"\nData source: {info['name']}")
     click.echo(f"Time range:  {info['start_year']}-{info['end_year']}")
-    click.echo(f"\nAvailable variables ({len(info['available_variables'])}):")
+    click.echo(f"\nVariables ({len(info['available_variables'])}):")
     for var in info["available_variables"]:
         req = "REQUIRED" if var in REQUIRED_VARIABLES else "optional"
         click.echo(f"  {var:30s} [{req}]")
-
     if info["missing_variables"]:
-        click.echo(f"\nMissing required variables ({len(info['missing_variables'])}):")
         for var in info["missing_variables"]:
-            click.echo(f"  {var:30s} [MISSING - will produce NaN]")
-    else:
-        click.echo("\nAll required variables available.")
+            click.echo(f"  {var:30s} [MISSING]")
+    click.echo(f"\nReady: {'YES' if info['ready'] else 'NO (missing variables)'}")
 
-    click.echo(f"\nReady for extraction: {'YES' if info['ready'] else 'NO (missing variables)'}")
 
-    if not data_path:
-        click.echo("\nUsage:")
-        click.echo("  1. Download GLARM data from https://digitalcommons.mtu.edu/glts/")
-        click.echo("  2. Place NetCDF files in a local directory")
-        click.echo("  3. Run: aorc-tools glarm-info --data-path /path/to/glarm --scenario rcp85")
-        click.echo("  4. Extract: aorc-tools extract --data-source glarm --year 2050 ...")
+@main.command(name="projections")
+def projections():
+    """List all available climate models for future wildfire risk."""
+    from aorc_tools.climate_model_adapter import list_models, NEX_GDDP_GCMS
+
+    models = list_models()
+    click.echo("Available Climate Models for Wildfire Risk Projection")
+    click.echo("=" * 60)
+
+    for key, m in models.items():
+        status = "READY" if m.get("adapter_class") else "PLANNED"
+        click.echo(f"\n  [{status}] {m['name']}")
+        click.echo(f"    Key:        {key}")
+        click.echo(f"    Type:       {m['type']}")
+        click.echo(f"    Period:     {m['period']}")
+        click.echo(f"    Resolution: {m['resolution']}")
+        click.echo(f"    Variables:  {m['variables']}")
+        click.echo(f"    Source:     {m['source']}")
+        if "scenarios" in m:
+            click.echo(f"    Scenarios:  {', '.join(m['scenarios'])}")
+        if "gcms" in m:
+            click.echo(f"    GCMs:       {len(m['gcms'])} available")
+        if "note" in m:
+            click.echo(f"    Note:       {m['note']}")
+
+    click.echo(f"\n\nNEX-GDDP-CMIP6 GCMs ({len(NEX_GDDP_GCMS)}):")
+    for i, gcm in enumerate(NEX_GDDP_GCMS):
+        click.echo(f"  {i+1:2d}. {gcm}")
+
+    click.echo("\nUsage:")
+    click.echo("  # Download and compute from NEX-GDDP-CMIP6 (recommended first):")
+    click.echo("  aorc-tools project-download --points data/output/points_index.csv \\")
+    click.echo("      --mirror-dir ./data/projections --source nex-gddp-cmip6 \\")
+    click.echo("      --gcm ACCESS-CM2 --scenario ssp585 --start-year 2040 --end-year 2060")
+    click.echo()
+    click.echo("  # Compute fire indices from downloaded projections:")
+    click.echo("  aorc-tools project-extract --points data/output/points_index.csv \\")
+    click.echo("      --mirror-dir ./data/projections --source nex-gddp-cmip6 \\")
+    click.echo("      --gcm ACCESS-CM2 --scenario ssp585 --start-year 2040 --end-year 2060")
+
+
+@main.command(name="project-download")
+@click.option("--points", "points_file", required=True, help="Path to points_index.csv")
+@click.option("--mirror-dir", required=True, help="Local directory for projection data")
+@click.option("--source", required=True, type=click.Choice(["nex-gddp-cmip6", "glarm"]),
+              help="Climate model source")
+@click.option("--gcm", default="ACCESS-CM2", help="GCM name (for NEX-GDDP-CMIP6)")
+@click.option("--scenario", required=True, help="Scenario (ssp245, ssp585, rcp45, rcp85)")
+@click.option("--start-year", required=True, type=int)
+@click.option("--end-year", required=True, type=int)
+@click.option("--start-month", default=1, type=int)
+@click.option("--end-month", default=12, type=int)
+def project_download(points_file, mirror_dir, source, gcm, scenario,
+                     start_year, end_year, start_month, end_month):
+    """Download climate projection data to local disk.
+
+    Downloads only your study-area points (same as AORC mirror pattern).
+    Supports NEX-GDDP-CMIP6 (27 GCMs, SSP2-4.5/SSP5-8.5) and GLARM.
+    """
+    from aorc_tools.point_filter import load_point_index
+    from aorc_tools.climate_model_adapter import get_adapter
+    from aorc_tools.projection_mirror import ProjectionMirror
+
+    points_df = load_point_index(points_file)
+    click.echo(f"Loaded {len(points_df)} points")
+
+    adapter = get_adapter(source, gcm=gcm, scenario=scenario)
+    click.echo(f"Source: {adapter.name}")
+
+    source_name = f"{source}/{gcm}/{scenario}" if source == "nex-gddp-cmip6" else f"{source}/{scenario}"
+    mirror = ProjectionMirror(mirror_dir, source_name, adapter, points_df)
+    status_info = mirror.status()
+    click.echo(f"Mirror: {status_info['months_downloaded']} months cached "
+               f"({status_info['total_size_gb']} GB)")
+
+    def progress(year, month, msg):
+        click.echo(f"  {year}-{month:02d}: {msg}")
+
+    count = mirror.download_range(start_year, end_year,
+                                   start_month=start_month, end_month=end_month,
+                                   callback=progress)
+    click.echo(f"\nDownloaded {count} new months")
+    status_info = mirror.status()
+    click.echo(f"Total: {status_info['months_downloaded']} months, "
+               f"{status_info['total_size_gb']} GB")
+
+
+@main.command(name="project-extract")
+@click.option("--points", "points_file", required=True, help="Path to points_index.csv")
+@click.option("--mirror-dir", required=True, help="Local projection data directory")
+@click.option("--source", required=True, type=click.Choice(["nex-gddp-cmip6", "glarm"]))
+@click.option("--gcm", default="ACCESS-CM2", help="GCM name (for NEX-GDDP-CMIP6)")
+@click.option("--scenario", required=True, help="Scenario (ssp245, ssp585, rcp45, rcp85)")
+@click.option("--output", default=None, help="Output directory (auto-generated if omitted)")
+@click.option("--start-year", required=True, type=int)
+@click.option("--end-year", required=True, type=int)
+@click.option("--fuel-model", default="G")
+@click.option("--format", "output_format", default="sqlite",
+              type=click.Choice(["sqlite", "csv", "both"]))
+def project_extract(points_file, mirror_dir, source, gcm, scenario, output,
+                    start_year, end_year, fuel_model, output_format):
+    """Compute fire indices from downloaded climate projections.
+
+    Uses the same fire index pipeline as AORC extraction but with
+    projection data as input. Results go to a separate output directory.
+    """
+    import time as t
+    from aorc_tools.point_filter import load_point_index
+    from aorc_tools.climate_model_adapter import get_adapter
+    from aorc_tools.projection_mirror import ProjectionMirror
+    from aorc_tools.extract import extract_year
+
+    points_df = load_point_index(points_file)
+    adapter = get_adapter(source, gcm=gcm, scenario=scenario)
+    source_name = f"{source}/{gcm}/{scenario}" if source == "nex-gddp-cmip6" else f"{source}/{scenario}"
+    mirror = ProjectionMirror(mirror_dir, source_name, adapter, points_df)
+
+    # Auto-generate output directory
+    if output is None:
+        safe_name = source_name.replace("/", "_")
+        output = f"./data/output_{safe_name}"
+    click.echo(f"Source:  {adapter.name}")
+    click.echo(f"Output:  {output}")
+    click.echo(f"Years:   {start_year}-{end_year}")
+
+    t_total = t.perf_counter()
+    state = {"fwi_state": None, "fm_state": None}
+
+    for year in range(start_year, end_year + 1):
+        click.echo(f"\n--- {year} ---")
+        t_yr = t.perf_counter()
+
+        def progress(pct, msg):
+            click.echo(f"  [{pct:5.1f}%] {msg}")
+
+        state = extract_year(
+            year, points_df, output,
+            fuel_model=fuel_model,
+            output_format=output_format,
+            skip_raw=True,
+            mirror=mirror,
+            fwi_state=state["fwi_state"],
+            fm_state=state["fm_state"],
+            callback=progress,
+        )
+        click.echo(f"  {year} done in {t.perf_counter() - t_yr:.0f}s")
+
+    click.echo(f"\nAll done! {end_year - start_year + 1} years in "
+               f"{t.perf_counter() - t_total:.0f}s")
+    click.echo(f"Output: {output}")
 
 
 if __name__ == "__main__":

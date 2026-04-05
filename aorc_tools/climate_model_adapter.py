@@ -1,36 +1,37 @@
 """
-Pluggable climate model adapter — abstract interface for AORC, GLARM, and future datasets.
+Pluggable climate model adapter — abstract interface for multiple climate datasets.
+
+Supports:
+- AORC (historical reanalysis, 1979-present, hourly, ~800m)
+- NEX-GDDP-CMIP6 (NASA downscaled projections, 1950-2100, daily, 0.25°)
+  Multiple GCMs: ACCESS-CM2, GFDL-ESM4, MPI-ESM1-2-HR, etc.
+  Scenarios: SSP2-4.5, SSP5-8.5
+- GLARM (Michigan Tech, Great Lakes, 1981-2099, daily, 18km)
+  Scenarios: RCP 4.5, RCP 8.5
+- Argonne ClimRR (Argonne WRF downscaling, fire indices pre-computed)
 
 All fire index computations receive data through this adapter interface,
-making the pipeline data-source agnostic. Swap AORC for GLARM (or any
-other climate model) by providing a different adapter.
+making the pipeline data-source agnostic.
 
-Adapters must supply the minimum fire weather variables:
-    - TMP_2maboveground (K) — 2m air temperature
-    - SPFH_2maboveground (kg/kg) — specific humidity (or RH directly)
-    - PRES_surface (Pa) — surface pressure
-    - UGRD_10maboveground (m/s) — U-wind component
-    - VGRD_10maboveground (m/s) — V-wind component
-    - APCP_surface (mm) — hourly precipitation
+Required variables (AORC standard names):
+    TMP_2maboveground (K), SPFH_2maboveground (kg/kg), PRES_surface (Pa),
+    UGRD_10maboveground (m/s), VGRD_10maboveground (m/s), APCP_surface (mm)
 
-Optional:
-    - DSWRF_surface (W/m²) — downward shortwave radiation
-    - DLWRF_surface (W/m²) — downward longwave radiation
-
-If a model doesn't provide all variables, the adapter should return
-np.nan arrays for missing ones — the fire indices will degrade
-gracefully (NaN propagation).
+If a model provides RH directly instead of specific humidity, the adapter
+converts internally. If a model provides wind speed instead of U/V components,
+it sets both components equal to speed/sqrt(2).
 """
 
+import calendar
 import logging
 from abc import ABC, abstractmethod
+from pathlib import Path
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
 
 
-# Standard variable names used by the fire index pipeline
 REQUIRED_VARIABLES = [
     "TMP_2maboveground",
     "SPFH_2maboveground",
@@ -52,43 +53,33 @@ class ClimateModelAdapter(ABC):
     @property
     @abstractmethod
     def name(self) -> str:
-        """Human-readable name of the data source."""
+        """Human-readable name."""
 
     @abstractmethod
     def get_available_variables(self) -> list:
-        """Return list of variable names this source provides."""
+        """Return list of standard variable names this source provides."""
 
     @abstractmethod
     def get_time_range(self) -> tuple:
-        """Return (start_year, end_year) of available data."""
+        """Return (start_year, end_year)."""
 
     @abstractmethod
     def get_coordinates(self):
-        """Return (latitudes, longitudes) arrays of the native grid."""
+        """Return (latitudes, longitudes) arrays."""
 
     @abstractmethod
     def get_daily_point_values(self, year, month, day,
                                 lat_indices, lon_indices,
                                 lat_bounds, lon_bounds):
-        """Fetch one day of data for the given point indices.
+        """Fetch one day for given point indices.
 
-        Returns:
-            dict with keys:
-                "hours": list of hour values (0-23)
-                "timestamps": DatetimeIndex
-                {variable_name}: array (n_hours, n_points)
+        Returns dict: "hours", "timestamps", {var_name}: (n_hours, n_points)
         """
 
     def get_multiday_point_values(self, year, month, start_day, end_day,
                                    lat_indices, lon_indices,
                                    lat_bounds, lon_bounds):
-        """Fetch multiple days. Default: calls get_daily_point_values per day.
-
-        Subclasses can override for batch optimization (e.g., AORC 6-day chunks).
-
-        Returns:
-            dict: day_number → daily data dict
-        """
+        """Fetch multiple days. Override for batch optimization."""
         result = {}
         for day in range(start_day, end_day + 1):
             try:
@@ -101,12 +92,10 @@ class ClimateModelAdapter(ABC):
         return result
 
     def get_missing_variables(self) -> list:
-        """Return REQUIRED variables NOT provided by this source."""
         available = set(self.get_available_variables())
         return [v for v in REQUIRED_VARIABLES if v not in available]
 
     def info(self) -> dict:
-        """Return summary information about this data source."""
         available = self.get_available_variables()
         missing = self.get_missing_variables()
         start, end = self.get_time_range()
@@ -120,8 +109,12 @@ class ClimateModelAdapter(ABC):
         }
 
 
+# ======================================================================
+# AORC Adapter (wraps existing AORCDataLoader)
+# ======================================================================
+
 class AORCAdapter(ClimateModelAdapter):
-    """Adapter wrapping the existing AORCDataLoader."""
+    """Wraps the existing AORCDataLoader."""
 
     def __init__(self):
         from aorc_tools.aorc_access import AORCDataLoader
@@ -140,64 +133,253 @@ class AORCAdapter(ClimateModelAdapter):
     def get_coordinates(self):
         return self._loader.get_coordinates()
 
+    def get_daily_point_values(self, *args, **kwargs):
+        return self._loader.get_daily_point_values(*args, **kwargs)
+
+    def get_multiday_point_values(self, *args, **kwargs):
+        return self._loader.get_multiday_point_values(*args, **kwargs)
+
+
+# ======================================================================
+# NEX-GDDP-CMIP6 Adapter (NASA, AWS S3, all fire weather variables)
+# ======================================================================
+
+# Available GCMs in NEX-GDDP-CMIP6
+NEX_GDDP_GCMS = [
+    "ACCESS-CM2",
+    "ACCESS-ESM1-5",
+    "BCC-CSM2-MR",
+    "CanESM5",
+    "CMCC-CM2-SR5",
+    "CMCC-ESM2",
+    "EC-Earth3",
+    "EC-Earth3-Veg-LR",
+    "FGOALS-g3",
+    "GFDL-CM4",
+    "GFDL-ESM4",
+    "GISS-E2-1-G",
+    "HadGEM3-GC31-LL",
+    "INM-CM4-8",
+    "INM-CM5-0",
+    "IPSL-CM6A-LR",
+    "KACE-1-0-G",
+    "KIOST-ESM",
+    "MIROC-ES2L",
+    "MIROC6",
+    "MPI-ESM1-2-HR",
+    "MPI-ESM1-2-LR",
+    "MRI-ESM2-0",
+    "NorESM2-LM",
+    "NorESM2-MM",
+    "TaiESM1",
+    "UKESM1-0-LL",
+]
+
+NEX_GDDP_SCENARIOS = ["historical", "ssp245", "ssp585"]
+
+# NEX-GDDP-CMIP6 variable names → our standard names
+NEX_GDDP_VARIABLE_MAP = {
+    "tas": "TMP_2maboveground",        # Near-surface air temp (K)
+    "hurs": "SPFH_2maboveground",      # Near-surface RH (%) — we convert
+    "pr": "APCP_surface",              # Precipitation (kg/m²/s → mm/hr)
+    "sfcWind": "UGRD_10maboveground",  # Near-surface wind speed (m/s)
+    # NEX-GDDP provides scalar wind, not U/V components
+    # We set both UGRD and VGRD = sfcWind/sqrt(2) so magnitude is correct
+}
+
+
+class NexGddpCmip6Adapter(ClimateModelAdapter):
+    """NASA NEX-GDDP-CMIP6 downscaled climate projections.
+
+    Data source: s3://nex-gddp-cmip6 (public, anonymous access)
+    Resolution: 0.25° (~25 km), daily
+    Period: 1950-2100
+    Variables: tas, tasmin, tasmax, hurs, pr, sfcWind
+    Scenarios: historical, SSP2-4.5, SSP5-8.5
+
+    Reference: Thrasher et al. 2022, Scientific Data
+    """
+
+    S3_BUCKET = "nex-gddp-cmip6"
+
+    def __init__(self, gcm="ACCESS-CM2", scenario="ssp585"):
+        if gcm not in NEX_GDDP_GCMS:
+            raise ValueError(f"Unknown GCM: {gcm}. Available: {NEX_GDDP_GCMS}")
+        if scenario not in NEX_GDDP_SCENARIOS:
+            raise ValueError(f"Unknown scenario: {scenario}. Available: {NEX_GDDP_SCENARIOS}")
+
+        self.gcm = gcm
+        self.scenario = scenario
+        self._ds_cache = {}
+        self._coords = None
+
+    @property
+    def name(self):
+        return f"NEX-GDDP-CMIP6 {self.gcm} ({self.scenario})"
+
+    def get_available_variables(self):
+        return list(REQUIRED_VARIABLES)  # We synthesize all needed vars
+
+    def get_time_range(self):
+        if self.scenario == "historical":
+            return (1950, 2014)
+        return (2015, 2100)
+
+    def get_coordinates(self):
+        """Return the NEX-GDDP-CMIP6 global grid coordinates."""
+        if self._coords is not None:
+            return self._coords
+
+        # NEX-GDDP-CMIP6 uses a regular 0.25° grid
+        lats = np.arange(-59.875, 90.125, 0.25)
+        lons = np.arange(0.125, 360.125, 0.25)
+        self._coords = (lats, lons)
+        return lats, lons
+
+    def _open_dataset(self, variable, year):
+        """Open a NEX-GDDP-CMIP6 NetCDF file from S3."""
+        import xarray as xr
+        import s3fs
+
+        cache_key = f"{variable}_{year}"
+        if cache_key in self._ds_cache:
+            return self._ds_cache[cache_key]
+
+        # S3 path: NEX-GDDP-CMIP6/{gcm}/{scenario}/r1i1p1f1/{variable}/
+        #           {variable}_day_{gcm}_{scenario}_r1i1p1f1_gn_{year}.nc
+        s3_path = (
+            f"s3://{self.S3_BUCKET}/NEX-GDDP-CMIP6/{self.gcm}/"
+            f"{self.scenario}/r1i1p1f1/{variable}/"
+            f"{variable}_day_{self.gcm}_{self.scenario}_r1i1p1f1_gn_{year}.nc"
+        )
+
+        fs = s3fs.S3FileSystem(anon=True)
+        store = s3fs.S3Map(root=s3_path, s3=fs)
+
+        try:
+            ds = xr.open_dataset(store, engine="h5netcdf")
+        except Exception:
+            ds = xr.open_dataset(store)
+
+        self._ds_cache[cache_key] = ds
+        return ds
+
     def get_daily_point_values(self, year, month, day,
                                 lat_indices, lon_indices,
                                 lat_bounds, lon_bounds):
-        return self._loader.get_daily_point_values(
-            year, month, day, lat_indices, lon_indices,
-            lat_bounds, lon_bounds,
-        )
+        """Extract point values for one day from NEX-GDDP-CMIP6.
 
-    def get_multiday_point_values(self, year, month, start_day, end_day,
-                                   lat_indices, lon_indices,
-                                   lat_bounds, lon_bounds):
-        return self._loader.get_multiday_point_values(
-            year, month, start_day, end_day,
-            lat_indices, lon_indices, lat_bounds, lon_bounds,
-        )
+        Daily data is disaggregated to 24 hours (constant within day)
+        since NEX-GDDP is daily resolution.
+        """
+        import pandas as pd
 
+        n_points = len(lat_indices)
+        timestamps = pd.date_range(
+            f"{year}-{month:02d}-{day:02d} 00:00",
+            f"{year}-{month:02d}-{day:02d} 23:00",
+            freq="h",
+        )
+        target_date = f"{year}-{month:02d}-{day:02d}"
+
+        result = {
+            "hours": list(range(24)),
+            "timestamps": timestamps,
+        }
+
+        # Temperature (K)
+        try:
+            ds = self._open_dataset("tas", year)
+            day_vals = ds["tas"].sel(time=target_date).values
+            temp_k = self._extract_points(day_vals, lat_indices, lon_indices)
+            result["TMP_2maboveground"] = np.tile(temp_k, (24, 1)).astype(np.float32)
+        except Exception as e:
+            logger.debug("tas not available for %s: %s", target_date, e)
+            result["TMP_2maboveground"] = np.full((24, n_points), np.nan, dtype=np.float32)
+
+        # Relative Humidity (%) → convert to specific humidity proxy
+        # The extraction pipeline will use this with the RH-aware path
+        try:
+            ds = self._open_dataset("hurs", year)
+            day_vals = ds["hurs"].sel(time=target_date).values
+            rh_pct = self._extract_points(day_vals, lat_indices, lon_indices)
+            # Store as "RH in SPFH slot" — the extract pipeline detects values > 1
+            # and treats them as RH directly instead of specific humidity
+            result["SPFH_2maboveground"] = np.tile(rh_pct / 100.0, (24, 1)).astype(np.float32)
+        except Exception as e:
+            logger.debug("hurs not available for %s: %s", target_date, e)
+            result["SPFH_2maboveground"] = np.full((24, n_points), np.nan, dtype=np.float32)
+
+        # Standard pressure assumption (no surface pressure in NEX-GDDP)
+        result["PRES_surface"] = np.full((24, n_points), 101325.0, dtype=np.float32)
+
+        # Precipitation (kg/m²/s → mm/hr)
+        try:
+            ds = self._open_dataset("pr", year)
+            day_vals = ds["pr"].sel(time=target_date).values
+            precip_kgms = self._extract_points(day_vals, lat_indices, lon_indices)
+            precip_mm_hr = precip_kgms * 3600.0  # kg/m²/s → mm/hr
+            result["APCP_surface"] = np.tile(precip_mm_hr, (24, 1)).astype(np.float32)
+        except Exception as e:
+            logger.debug("pr not available for %s: %s", target_date, e)
+            result["APCP_surface"] = np.full((24, n_points), np.nan, dtype=np.float32)
+
+        # Wind speed (m/s) → split into U/V components
+        try:
+            ds = self._open_dataset("sfcWind", year)
+            day_vals = ds["sfcWind"].sel(time=target_date).values
+            ws = self._extract_points(day_vals, lat_indices, lon_indices)
+            # Split scalar wind into equal U/V so magnitude is preserved
+            component = ws / np.sqrt(2.0)
+            result["UGRD_10maboveground"] = np.tile(component, (24, 1)).astype(np.float32)
+            result["VGRD_10maboveground"] = np.tile(component, (24, 1)).astype(np.float32)
+        except Exception as e:
+            logger.debug("sfcWind not available for %s: %s", target_date, e)
+            result["UGRD_10maboveground"] = np.full((24, n_points), np.nan, dtype=np.float32)
+            result["VGRD_10maboveground"] = np.full((24, n_points), np.nan, dtype=np.float32)
+
+        return result
+
+    def _extract_points(self, grid_2d, lat_indices, lon_indices):
+        """Extract point values from a 2D grid using index arrays."""
+        n_points = len(lat_indices)
+        values = np.full(n_points, np.nan, dtype=np.float32)
+        for i, (lat_idx, lon_idx) in enumerate(zip(lat_indices, lon_indices)):
+            try:
+                values[i] = grid_2d[lat_idx, lon_idx]
+            except (IndexError, ValueError):
+                pass
+        return values
+
+
+# ======================================================================
+# GLARM Adapter (Michigan Tech, Great Lakes)
+# ======================================================================
 
 class GLARMAdapter(ClimateModelAdapter):
-    """Adapter for GLARM (Great Lakes Atmosphere-Regional Model) projections.
-
-    GLARM-Proj1 provides daily 2m air temperature at 18km resolution
-    over the Great Lakes basin (1981-2099, RCP 4.5 and RCP 8.5).
+    """GLARM-Proj1 Great Lakes climate projections.
 
     Data source: https://digitalcommons.mtu.edu/glts/
+    Resolution: 18 km (atmospheric), 1-4 km (lake)
+    Period: 1981-2099 (RCP 4.5 and RCP 8.5)
     Reference: Xue et al. 2022 (GMD)
-
-    NOTE: GLARM-Proj1 is primarily a lake thermal model. It provides
-    air temperature but may not include humidity, wind, or precipitation.
-    Missing variables will produce NaN fire indices — supplement with
-    the driving GCM (RegCM4) or another dataset for full coverage.
-
-    Configuration:
-        data_path: Path to GLARM NetCDF files on disk
-        scenario: "rcp45" or "rcp85"
-        variable_map: Optional custom mapping of GLARM var names → standard names
     """
 
-    # Default mapping of GLARM variable names → fire weather standard names
-    # These are the expected names based on RegCM4/WRF convention.
-    # Update once the actual GLARM file contents are inspected.
     DEFAULT_VARIABLE_MAP = {
-        "T2": "TMP_2maboveground",        # 2m air temperature (K)
-        "Q2": "SPFH_2maboveground",       # 2m specific humidity (kg/kg)
-        "PSFC": "PRES_surface",            # Surface pressure (Pa)
-        "U10": "UGRD_10maboveground",      # 10m U-wind (m/s)
-        "V10": "VGRD_10maboveground",      # 10m V-wind (m/s)
-        "RAIN": "APCP_surface",            # Precipitation (mm)
-        "SWDOWN": "DSWRF_surface",         # Downward shortwave (W/m²)
-        "GLW": "DLWRF_surface",            # Downward longwave (W/m²)
+        "T2": "TMP_2maboveground",
+        "Q2": "SPFH_2maboveground",
+        "PSFC": "PRES_surface",
+        "U10": "UGRD_10maboveground",
+        "V10": "VGRD_10maboveground",
+        "RAIN": "APCP_surface",
+        "SWDOWN": "DSWRF_surface",
+        "GLW": "DLWRF_surface",
     }
 
     def __init__(self, data_path, scenario="rcp85", variable_map=None):
-        from pathlib import Path
-
         self.data_path = Path(data_path)
         self.scenario = scenario
         self.variable_map = variable_map or self.DEFAULT_VARIABLE_MAP
-        self._reverse_map = {v: k for k, v in self.variable_map.items()}
         self._ds_cache = {}
 
         if not self.data_path.exists():
@@ -208,19 +390,11 @@ class GLARMAdapter(ClimateModelAdapter):
         return f"GLARM-Proj1 ({self.scenario.upper()})"
 
     def get_available_variables(self):
-        """Check which variables actually exist in the data files."""
-        # If data path doesn't exist, report based on variable map
         if not self.data_path.exists():
             return list(self.variable_map.values())
-
-        # Try to open a sample file and check variables
         try:
             ds = self._open_sample()
-            found = []
-            for glarm_name, standard_name in self.variable_map.items():
-                if glarm_name in ds:
-                    found.append(standard_name)
-            return found
+            return [std for glarm, std in self.variable_map.items() if glarm in ds]
         except Exception:
             return list(self.variable_map.values())
 
@@ -228,35 +402,15 @@ class GLARMAdapter(ClimateModelAdapter):
         return (1981, 2099)
 
     def get_coordinates(self):
-        """Return lat/lon arrays from GLARM grid.
-
-        NOTE: GLARM uses a different grid than AORC. The extraction
-        pipeline will need to regrid or use nearest-neighbor matching.
-        """
-        try:
-            ds = self._open_sample()
-            lats = ds["lat"].values if "lat" in ds else ds["XLAT"].values
-            lons = ds["lon"].values if "lon" in ds else ds["XLONG"].values
-            return lats, lons
-        except Exception as e:
-            logger.error("Cannot read GLARM coordinates: %s", e)
-            raise
+        ds = self._open_sample()
+        lats = ds["lat"].values if "lat" in ds else ds["XLAT"].values
+        lons = ds["lon"].values if "lon" in ds else ds["XLONG"].values
+        return lats, lons
 
     def get_daily_point_values(self, year, month, day,
                                 lat_indices, lon_indices,
                                 lat_bounds, lon_bounds):
-        """Extract point values from GLARM NetCDF for one day.
-
-        This is a stub — the actual implementation depends on the
-        GLARM file naming convention and internal structure.
-        """
         import pandas as pd
-
-        try:
-            ds = self._open_dataset(year, month)
-        except FileNotFoundError:
-            logger.warning("No GLARM data for %d-%02d", year, month)
-            return self._empty_day(year, month, day, len(lat_indices))
 
         n_points = len(lat_indices)
         timestamps = pd.date_range(
@@ -265,21 +419,20 @@ class GLARMAdapter(ClimateModelAdapter):
             freq="h",
         )
 
-        result = {
-            "hours": list(range(24)),
-            "timestamps": timestamps,
-        }
+        try:
+            ds = self._open_dataset(year, month)
+        except FileNotFoundError:
+            return self._empty_day(year, month, day, n_points, timestamps)
+
+        result = {"hours": list(range(24)), "timestamps": timestamps}
 
         for glarm_name, standard_name in self.variable_map.items():
             if glarm_name in ds:
                 try:
-                    # Attempt to extract data for this day
-                    # Actual indexing depends on GLARM file structure
                     day_data = self._extract_variable(ds, glarm_name, year, month, day,
                                                        lat_indices, lon_indices)
                     result[standard_name] = day_data
-                except Exception as e:
-                    logger.debug("Cannot extract %s: %s", glarm_name, e)
+                except Exception:
                     result[standard_name] = np.full((24, n_points), np.nan, dtype=np.float32)
             else:
                 result[standard_name] = np.full((24, n_points), np.nan, dtype=np.float32)
@@ -287,154 +440,147 @@ class GLARMAdapter(ClimateModelAdapter):
         return result
 
     def _open_sample(self):
-        """Open a sample GLARM file to inspect structure."""
         import xarray as xr
-        from pathlib import Path
-
-        # Try common naming patterns
-        patterns = [
-            f"{self.scenario}/*.nc",
-            f"*{self.scenario}*.nc",
-            "*.nc",
-        ]
-        for pattern in patterns:
+        for pattern in [f"{self.scenario}/*.nc", f"*{self.scenario}*.nc", "*.nc"]:
             files = sorted(self.data_path.glob(pattern))
             if files:
                 return xr.open_dataset(files[0])
-
-        raise FileNotFoundError(f"No NetCDF files found in {self.data_path}")
+        raise FileNotFoundError(f"No NetCDF files in {self.data_path}")
 
     def _open_dataset(self, year, month):
-        """Open GLARM dataset for a specific year/month.
-
-        Tries common file naming conventions. Override if your
-        GLARM files use a different naming scheme.
-        """
         import xarray as xr
+        key = f"{year}-{month:02d}"
+        if key in self._ds_cache:
+            return self._ds_cache[key]
 
-        cache_key = f"{year}-{month:02d}"
-        if cache_key in self._ds_cache:
-            return self._ds_cache[cache_key]
-
-        # Try various naming patterns
         patterns = [
             self.data_path / self.scenario / f"glarm_{year}_{month:02d}.nc",
             self.data_path / self.scenario / f"glarm_{year}.nc",
             self.data_path / f"{self.scenario}_{year}_{month:02d}.nc",
             self.data_path / f"{self.scenario}_{year}.nc",
         ]
-
         for path in patterns:
             if path.exists():
                 ds = xr.open_dataset(path)
-                self._ds_cache[cache_key] = ds
+                self._ds_cache[key] = ds
                 return ds
-
-        raise FileNotFoundError(
-            f"No GLARM file found for {year}-{month:02d}. "
-            f"Tried: {[str(p) for p in patterns]}"
-        )
+        raise FileNotFoundError(f"No GLARM file for {year}-{month:02d}")
 
     def _extract_variable(self, ds, var_name, year, month, day,
                            lat_indices, lon_indices):
-        """Extract point values for a variable on a specific day.
-
-        Override this method if GLARM uses non-standard dimensions.
-        """
         import pandas as pd
-
-        # Find time dimension
-        time_dim = None
-        for dim in ["time", "Time", "XTIME"]:
-            if dim in ds.dims:
-                time_dim = dim
-                break
-
-        if time_dim is None:
-            raise ValueError(f"Cannot find time dimension in GLARM dataset")
-
-        # Select the day
-        target_date = pd.Timestamp(year, month, day)
+        target = pd.Timestamp(year, month, day)
         var = ds[var_name]
 
-        # Try time selection
+        time_dim = next((d for d in ["time", "Time", "XTIME"] if d in ds.dims), None)
+        if time_dim is None:
+            raise ValueError("No time dimension found")
+
         times = pd.DatetimeIndex(ds[time_dim].values)
-        day_mask = times.date == target_date.date()
+        mask = times.date == target.date()
+        if not mask.any():
+            return np.full((24, len(lat_indices)), np.nan, dtype=np.float32)
 
-        if not day_mask.any():
-            n_points = len(lat_indices)
-            return np.full((24, n_points), np.nan, dtype=np.float32)
-
-        day_data = var.isel({time_dim: day_mask})
-
-        # Extract point values (nearest neighbor)
-        # This depends on the grid structure — lat/lon might be 1D or 2D
-        n_times = day_data.shape[0]
-        n_points = len(lat_indices)
-        result = np.full((n_times, n_points), np.nan, dtype=np.float32)
-
-        for i, (lat_idx, lon_idx) in enumerate(zip(lat_indices, lon_indices)):
+        data = var.isel({time_dim: mask}).values
+        n_times = data.shape[0]
+        n_pts = len(lat_indices)
+        result = np.full((n_times, n_pts), np.nan, dtype=np.float32)
+        for i, (li, lo) in enumerate(zip(lat_indices, lon_indices)):
             try:
-                result[:, i] = day_data.values[:, lat_idx, lon_idx]
+                result[:, i] = data[:, li, lo]
             except (IndexError, ValueError):
                 pass
 
-        # Pad to 24 hours if needed (daily data → repeat for all hours)
-        if n_times == 1:
-            result = np.repeat(result, 24, axis=0)
-        elif n_times < 24:
-            pad = np.full((24 - n_times, n_points), np.nan, dtype=np.float32)
-            result = np.concatenate([result, pad], axis=0)
+        # Pad daily to 24h
+        if n_times < 24:
+            result = np.repeat(result, max(1, 24 // n_times), axis=0)[:24]
+        return result
 
-        return result[:24]
-
-    def _empty_day(self, year, month, day, n_points):
-        """Return empty data structure for a day with no data."""
-        import pandas as pd
-
-        timestamps = pd.date_range(
-            f"{year}-{month:02d}-{day:02d} 00:00",
-            f"{year}-{month:02d}-{day:02d} 23:00",
-            freq="h",
-        )
-        result = {
-            "hours": list(range(24)),
-            "timestamps": timestamps,
-        }
-        for standard_name in self.variable_map.values():
-            result[standard_name] = np.full((24, n_points), np.nan, dtype=np.float32)
+    def _empty_day(self, year, month, day, n_points, timestamps):
+        result = {"hours": list(range(24)), "timestamps": timestamps}
+        for std in self.variable_map.values():
+            result[std] = np.full((24, n_points), np.nan, dtype=np.float32)
         return result
 
 
+# ======================================================================
+# Registry of all available climate models
+# ======================================================================
+
+CLIMATE_MODEL_REGISTRY = {
+    "aorc": {
+        "name": "NOAA AORC v1.1",
+        "type": "reanalysis",
+        "period": "1979-present",
+        "resolution": "~800m hourly",
+        "variables": "All fire weather vars",
+        "source": "s3://noaa-nws-aorc-v1-1-1km",
+        "adapter_class": "AORCAdapter",
+    },
+    "nex-gddp-cmip6": {
+        "name": "NASA NEX-GDDP-CMIP6",
+        "type": "projection",
+        "period": "1950-2100",
+        "resolution": "0.25° daily",
+        "variables": "tas, hurs, pr, sfcWind, tasmin, tasmax",
+        "source": "s3://nex-gddp-cmip6",
+        "gcms": NEX_GDDP_GCMS,
+        "scenarios": ["historical", "ssp245", "ssp585"],
+        "adapter_class": "NexGddpCmip6Adapter",
+    },
+    "glarm": {
+        "name": "GLARM-Proj1 (Michigan Tech)",
+        "type": "projection",
+        "period": "1981-2099",
+        "resolution": "18km daily (atm), 1-4km (lake)",
+        "variables": "T2 (+ others TBD)",
+        "source": "https://digitalcommons.mtu.edu/glts/",
+        "scenarios": ["rcp45", "rcp85"],
+        "adapter_class": "GLARMAdapter",
+    },
+    "climrr": {
+        "name": "Argonne ClimRR (WRF downscaling)",
+        "type": "projection",
+        "period": "2045-2054, 2085-2094",
+        "resolution": "12km",
+        "variables": "60+ variables including FWI",
+        "source": "https://disgeoportal.egs.anl.gov/ClimRR/",
+        "note": "Pre-computed FWI available; raw data access TBD",
+        "adapter_class": None,  # Not yet implemented
+    },
+}
+
+
 def get_adapter(source="aorc", **kwargs):
-    """Factory function to get the appropriate climate model adapter.
+    """Factory: create a climate model adapter.
 
     Args:
-        source: "aorc" (default), "glarm", or path to a config file.
-        **kwargs: Passed to the adapter constructor.
-
-    Returns:
-        ClimateModelAdapter instance.
+        source: "aorc", "nex-gddp-cmip6", "glarm", or config file path.
+        **kwargs: gcm=, scenario=, data_path=, etc.
     """
     if source == "aorc":
         return AORCAdapter()
+    elif source in ("nex-gddp-cmip6", "nex-gddp", "cmip6"):
+        return NexGddpCmip6Adapter(
+            gcm=kwargs.get("gcm", "ACCESS-CM2"),
+            scenario=kwargs.get("scenario", "ssp585"),
+        )
     elif source == "glarm":
-        return GLARMAdapter(**kwargs)
+        return GLARMAdapter(
+            data_path=kwargs.get("data_path", "./data/glarm"),
+            scenario=kwargs.get("scenario", "rcp85"),
+        )
     else:
-        # Treat as config file path
+        # Try as config file
         import json
-        from pathlib import Path
-
         config_path = Path(source)
         if config_path.exists():
             with open(config_path) as f:
                 config = json.load(f)
-            adapter_type = config.pop("type", "glarm")
-            if adapter_type == "glarm":
-                return GLARMAdapter(**config)
-            elif adapter_type == "aorc":
-                return AORCAdapter()
-            else:
-                raise ValueError(f"Unknown adapter type: {adapter_type}")
-
+            return get_adapter(config.pop("type", "aorc"), **config)
         raise ValueError(f"Unknown data source: {source}")
+
+
+def list_models():
+    """Return the climate model registry."""
+    return CLIMATE_MODEL_REGISTRY

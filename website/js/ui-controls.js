@@ -25,7 +25,6 @@ const UIControls = {
 
     _loadDebounceTimer: null,
     _isLoading: false,
-    _continuousPlay: false,
     _fireDates: new Set(),  // days in current month with fire discoveries
 
     /**
@@ -101,14 +100,6 @@ const UIControls = {
 
         // Speed selector
         // (speed is read dynamically during playback)
-
-        // Continuous playback toggle
-        const contToggle = document.getElementById("continuous-toggle");
-        if (contToggle) {
-            contToggle.addEventListener("change", (e) => {
-                this._continuousPlay = e.target.checked;
-            });
-        }
 
         // Wildfire overlay toggle
         document.getElementById("wildfire-toggle").addEventListener("change", (e) => {
@@ -256,7 +247,7 @@ const UIControls = {
 
             this._playIndex++;
             if (this._playIndex >= this._playFrames.length) {
-                if (this._continuousPlay) {
+                if (true) {  // Always continue across months
                     // Advance to next month
                     this._advanceMonth();
                     return; // _advanceMonth will resume playback after data loads
@@ -340,7 +331,7 @@ const UIControls = {
 
         // Load data for new month, then resume
         await this._loadAndDisplay();
-        if (this._continuousPlay) {
+        if (true) {  // Always continue across months
             this._startPlayback();
         }
     },
