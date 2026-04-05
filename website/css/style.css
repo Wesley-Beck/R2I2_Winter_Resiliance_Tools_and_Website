@@ -507,11 +507,71 @@ select.full-width {
     display: block;
 }
 
-#source-summary {
+/* --- Data Source Info Card --- */
+
+.source-card {
+    background: #1e1410;
+    border: 1px solid #3a2a18;
+    border-radius: 4px;
+    padding: 6px 8px;
+    margin-top: 6px;
     font-size: 0.75rem;
-    color: #a08060;
-    line-height: 1.4;
-    margin-top: 4px;
+    line-height: 1.5;
+}
+
+.source-card-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 1px;
+}
+
+.card-label {
+    color: #8a7060;
+    min-width: 68px;
+    flex-shrink: 0;
+}
+
+.source-card-row span:not(.card-label):not(.source-badge) {
+    color: #e0d0c0;
+}
+
+/* Data type badges */
+
+.source-badge {
+    display: inline-block;
+    font-size: 0.65rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    margin-bottom: 2px;
+}
+
+.badge-observed {
+    background: #1a4a2a;
+    color: #80d090;
+    border: 1px solid #2a6a3a;
+}
+
+.badge-statistical {
+    background: #1a2a4a;
+    color: #80a0d0;
+    border: 1px solid #2a3a6a;
+}
+
+.badge-dynamical {
+    background: #4a2a1a;
+    color: #d0a080;
+    border: 1px solid #6a3a2a;
+}
+
+/* Model chain display */
+#card-chain {
+    font-family: 'Courier New', monospace;
+    font-size: 0.7rem;
+    color: #c8a880;
 }
 
 /* --- Responsive --- */
