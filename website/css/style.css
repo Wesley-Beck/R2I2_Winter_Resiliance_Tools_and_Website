@@ -462,6 +462,24 @@ select.full-width {
     width: 100%;
 }
 
+#source-panel .input-group {
+    margin-bottom: 6px;
+}
+
+#source-panel .input-group label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #c89060;
+    margin-bottom: 2px;
+    display: block;
+}
+
+#source-summary {
+    color: #a08060;
+    line-height: 1.4;
+}
+
 /* --- Responsive --- */
 
 @media (max-width: 768px) {

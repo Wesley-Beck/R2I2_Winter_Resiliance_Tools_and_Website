@@ -444,19 +444,21 @@ const UIControls = {
 
     _updateProvenance() {
         const y = this.currentYear;
-        const src = document.getElementById("data-source-select");
-        const srcText = src.options[src.selectedIndex].textContent;
-        const srcVal = src.value;
+        const family = document.getElementById("model-family-select").value;
+        const gcmEl = document.getElementById("gcm-select");
+        const scenEl = document.getElementById("scenario-select");
+        const gcm = gcmEl ? gcmEl.value : "";
+        const scenario = scenEl ? scenEl.value : "";
         let note = "";
 
-        if (srcVal.includes("glarm")) {
-            note = `GLARM-Proj1 (Michigan Tech): RegCM4 dynamical downscaling, 18km, daily. ${srcVal.includes("rcp45") ? "RCP 4.5" : "RCP 8.5"} scenario.`;
-        } else if (srcVal.includes("climrr")) {
-            const ssp = srcVal.includes("ssp245") ? "SSP2-4.5 (mid-range)" : "SSP5-8.5 (high emissions)";
+        if (family === "glarm") {
+            const rcp = scenario === "rcp45" ? "RCP 4.5" : "RCP 8.5";
+            note = `GLARM-Proj1 (Michigan Tech): RegCM4 dynamical downscaling, 18km, daily. ${rcp} scenario.`;
+        } else if (family === "climrr") {
+            const ssp = scenario === "ssp245" ? "SSP2-4.5 (mid-range)" : "SSP5-8.5 (high emissions)";
             note = `Argonne ClimRR: CESM2 + WRF dynamical downscaling, 12km. ${ssp} scenario. Mid-century (2045-2064) / End-century (2075-2094).`;
-        } else if (srcVal.includes("nex_")) {
-            const gcm = srcText;
-            const ssp = srcVal.includes("ssp245") ? "SSP2-4.5 (mid-range)" : "SSP5-8.5 (high emissions)";
+        } else if (family === "nex-gddp-cmip6") {
+            const ssp = scenario === "ssp245" ? "SSP2-4.5 (mid-range)" : "SSP5-8.5 (high emissions)";
             note = `NEX-GDDP-CMIP6: ${gcm} downscaled to 0.25°, daily. ${ssp} scenario. NASA/BCSD method.`;
         } else {
             // AORC historical

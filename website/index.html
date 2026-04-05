@@ -30,33 +30,63 @@
                 <!-- Data Source -->
                 <section class="panel" id="source-panel">
                     <h3>Data Source</h3>
-                    <select id="data-source-select" class="full-width">
-                        <optgroup label="Historical">
-                            <option value="../data/output" selected>AORC v1.1 (1979–present)</option>
-                        </optgroup>
-                        <optgroup label="GLARM Projections (Michigan Tech)">
-                            <option value="../data/output_glarm_rcp45">GLARM RCP 4.5</option>
-                            <option value="../data/output_glarm_rcp85">GLARM RCP 8.5</option>
-                        </optgroup>
-                        <optgroup label="NEX-GDDP-CMIP6 SSP2-4.5 (Mid-range)">
-                            <option value="../data/output_nex_ACCESS-CM2_ssp245">ACCESS-CM2</option>
-                            <option value="../data/output_nex_GFDL-ESM4_ssp245">GFDL-ESM4</option>
-                            <option value="../data/output_nex_MRI-ESM2-0_ssp245">MRI-ESM2-0</option>
-                            <option value="../data/output_nex_MIROC6_ssp245">MIROC6</option>
-                            <option value="../data/output_nex_EC-Earth3_ssp245">EC-Earth3</option>
-                        </optgroup>
-                        <optgroup label="NEX-GDDP-CMIP6 SSP5-8.5 (High emissions)">
-                            <option value="../data/output_nex_ACCESS-CM2_ssp585">ACCESS-CM2</option>
-                            <option value="../data/output_nex_GFDL-ESM4_ssp585">GFDL-ESM4</option>
-                            <option value="../data/output_nex_MRI-ESM2-0_ssp585">MRI-ESM2-0</option>
-                            <option value="../data/output_nex_MIROC6_ssp585">MIROC6</option>
-                            <option value="../data/output_nex_EC-Earth3_ssp585">EC-Earth3</option>
-                        </optgroup>
-                        <optgroup label="Argonne ClimRR (CESM2/WRF 12km)">
-                            <option value="../data/output_climrr_ssp245">ClimRR SSP2-4.5</option>
-                            <option value="../data/output_climrr_ssp585">ClimRR SSP5-8.5</option>
-                        </optgroup>
-                    </select>
+
+                    <!-- Model family selector -->
+                    <div class="input-group">
+                        <label for="model-family-select">Model</label>
+                        <select id="model-family-select" class="full-width">
+                            <option value="aorc" selected>AORC v1.1 (Historical)</option>
+                            <option value="nex-gddp-cmip6">NEX-GDDP-CMIP6 (27 GCMs)</option>
+                            <option value="glarm">GLARM (Michigan Tech)</option>
+                            <option value="climrr">ClimRR (Argonne/WRF)</option>
+                        </select>
+                    </div>
+
+                    <!-- GCM selector (NEX-GDDP-CMIP6 only) -->
+                    <div class="input-group" id="gcm-group" style="display:none;">
+                        <label for="gcm-select">GCM</label>
+                        <select id="gcm-select" class="full-width">
+                            <option value="ACCESS-CM2">ACCESS-CM2</option>
+                            <option value="ACCESS-ESM1-5">ACCESS-ESM1-5</option>
+                            <option value="BCC-CSM2-MR">BCC-CSM2-MR</option>
+                            <option value="CanESM5">CanESM5</option>
+                            <option value="CMCC-CM2-SR5">CMCC-CM2-SR5</option>
+                            <option value="CMCC-ESM2">CMCC-ESM2</option>
+                            <option value="EC-Earth3">EC-Earth3</option>
+                            <option value="EC-Earth3-Veg-LR">EC-Earth3-Veg-LR</option>
+                            <option value="FGOALS-g3">FGOALS-g3</option>
+                            <option value="GFDL-CM4">GFDL-CM4</option>
+                            <option value="GFDL-ESM4">GFDL-ESM4</option>
+                            <option value="GISS-E2-1-G">GISS-E2-1-G</option>
+                            <option value="HadGEM3-GC31-LL">HadGEM3-GC31-LL</option>
+                            <option value="INM-CM4-8">INM-CM4-8</option>
+                            <option value="INM-CM5-0">INM-CM5-0</option>
+                            <option value="IPSL-CM6A-LR">IPSL-CM6A-LR</option>
+                            <option value="KACE-1-0-G">KACE-1-0-G</option>
+                            <option value="KIOST-ESM">KIOST-ESM</option>
+                            <option value="MIROC-ES2L">MIROC-ES2L</option>
+                            <option value="MIROC6">MIROC6</option>
+                            <option value="MPI-ESM1-2-HR">MPI-ESM1-2-HR</option>
+                            <option value="MPI-ESM1-2-LR">MPI-ESM1-2-LR</option>
+                            <option value="MRI-ESM2-0">MRI-ESM2-0</option>
+                            <option value="NorESM2-LM">NorESM2-LM</option>
+                            <option value="NorESM2-MM">NorESM2-MM</option>
+                            <option value="TaiESM1">TaiESM1</option>
+                            <option value="UKESM1-0-LL">UKESM1-0-LL</option>
+                        </select>
+                    </div>
+
+                    <!-- Scenario selector (projections only) -->
+                    <div class="input-group" id="scenario-group" style="display:none;">
+                        <label for="scenario-select">Scenario</label>
+                        <select id="scenario-select" class="full-width">
+                        </select>
+                    </div>
+
+                    <!-- Active source summary -->
+                    <div id="source-summary" class="meta-note" style="font-size:0.75rem; margin-top:4px;">
+                        NOAA AORC v1.1 &mdash; ~800m hourly reanalysis, 1979&ndash;present
+                    </div>
                 </section>
 
                 <!-- Layer Selector -->
