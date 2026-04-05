@@ -384,7 +384,8 @@ def projections():
 @main.command(name="project-download")
 @click.option("--points", "points_file", required=True, help="Path to points_index.csv")
 @click.option("--mirror-dir", required=True, help="Local directory for projection data")
-@click.option("--source", required=True, type=click.Choice(["nex-gddp-cmip6", "glarm"]),
+@click.option("--source", required=True,
+              type=click.Choice(["nex-gddp-cmip6", "glarm", "climrr"]),
               help="Climate model source")
 @click.option("--gcm", default="ACCESS-CM2", help="GCM name (for NEX-GDDP-CMIP6)")
 @click.option("--scenario", required=True, help="Scenario (ssp245, ssp585, rcp45, rcp85)")
@@ -430,7 +431,8 @@ def project_download(points_file, mirror_dir, source, gcm, scenario,
 @main.command(name="project-extract")
 @click.option("--points", "points_file", required=True, help="Path to points_index.csv")
 @click.option("--mirror-dir", required=True, help="Local projection data directory")
-@click.option("--source", required=True, type=click.Choice(["nex-gddp-cmip6", "glarm"]))
+@click.option("--source", required=True,
+              type=click.Choice(["nex-gddp-cmip6", "glarm", "climrr"]))
 @click.option("--gcm", default="ACCESS-CM2", help="GCM name (for NEX-GDDP-CMIP6)")
 @click.option("--scenario", required=True, help="Scenario (ssp245, ssp585, rcp45, rcp85)")
 @click.option("--output", default=None, help="Output directory (auto-generated if omitted)")
@@ -463,6 +465,8 @@ def project_extract(points_file, mirror_dir, source, gcm, scenario, output,
             output = f"./data/output_nex_{gcm}_{scenario}"
         elif source == "glarm":
             output = f"./data/output_glarm_{scenario}"
+        elif source == "climrr":
+            output = f"./data/output_climrr_{scenario}"
         else:
             safe_name = source_name.replace("/", "_")
             output = f"./data/output_{safe_name}"

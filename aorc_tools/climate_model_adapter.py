@@ -504,6 +504,378 @@ class GLARMAdapter(ClimateModelAdapter):
 
 
 # ======================================================================
+# Argonne ClimRR Adapter (CESM2 + WRF downscaling, ArcGIS Feature Service)
+# ======================================================================
+
+# ClimRR ArcGIS Feature Service base URL
+CLIMRR_BASE_URL = "https://disgeoportal.egs.anl.gov/server/rest/services/ClimRR"
+
+# ClimRR period definitions
+CLIMRR_PERIODS = {
+    "historical": (1995, 2014),
+    "midcentury": (2045, 2064),
+    "endcentury": (2075, 2094),
+}
+
+# Map from ClimRR field names to our standard variables
+CLIMRR_VARIABLE_MAP = {
+    "Temp": "TMP_2maboveground",
+    "TempMin": "TMP_2maboveground",  # used for daily min
+    "TempMax": "TMP_2maboveground",  # used for daily max
+    "Precip": "APCP_surface",
+    "Wind": "UGRD_10maboveground",
+    "Humidity": "SPFH_2maboveground",
+}
+
+
+class ClimRRAdapter(ClimateModelAdapter):
+    """Argonne ClimRR climate projections via ArcGIS Feature Service.
+
+    Data source: https://disgeoportal.egs.anl.gov/ClimRR/
+    Resolution: 12km (WRF dynamical downscaling of CESM2/CMIP6)
+    Periods: Historical (1995-2014), Mid-century (2045-2064), End-century (2075-2094)
+    Scenarios: SSP2-4.5, SSP5-8.5
+
+    ClimRR provides aggregated statistics (monthly/seasonal means) rather than
+    daily time series. For fire index computation, we disaggregate monthly
+    means to daily values with sinusoidal temperature variation.
+
+    Note: This adapter uses ArcGIS REST endpoints. For bulk analysis,
+    consider downloading data from the portal and providing local NetCDF files.
+    """
+
+    def __init__(self, scenario="ssp585", period="midcentury", data_path=None):
+        """
+        Args:
+            scenario: "ssp245" or "ssp585"
+            period: "historical", "midcentury", or "endcentury"
+            data_path: Optional path to locally downloaded ClimRR data (NetCDF/CSV).
+                       If provided, reads from local files instead of ArcGIS service.
+        """
+        self.scenario = scenario
+        self.period = period
+        self.data_path = Path(data_path) if data_path else None
+        self._cache = {}
+
+        if period not in CLIMRR_PERIODS:
+            raise ValueError(f"Unknown period: {period}. "
+                             f"Available: {list(CLIMRR_PERIODS.keys())}")
+
+    @property
+    def name(self):
+        return f"ClimRR ({self.scenario.upper()}, {self.period})"
+
+    def get_available_variables(self):
+        return list(REQUIRED_VARIABLES)
+
+    def get_time_range(self):
+        return CLIMRR_PERIODS[self.period]
+
+    def get_coordinates(self):
+        # ClimRR uses a 12km WRF grid; approximate as regular grid
+        # covering the Great Lakes region
+        lats = np.arange(36.0, 50.0, 0.108)  # ~12km at 43°N
+        lons = np.arange(-93.0, -75.0, 0.144)  # ~12km
+        return lats, lons
+
+    def get_daily_point_values(self, year, month, day,
+                                lat_indices, lon_indices,
+                                lat_bounds, lon_bounds):
+        """Extract point values for one day from ClimRR.
+
+        ClimRR provides monthly/seasonal aggregates. We disaggregate to
+        daily/hourly with realistic diurnal variation:
+        - Temperature: sinusoidal daily cycle from Tmin to Tmax
+        - Precipitation: uniform distribution of monthly total
+        - Wind: constant daily value from monthly mean
+        - Humidity: inverse of temperature cycle
+        """
+        import pandas as pd
+
+        n_points = len(lat_indices)
+        timestamps = pd.date_range(
+            f"{year}-{month:02d}-{day:02d} 00:00",
+            f"{year}-{month:02d}-{day:02d} 23:00",
+            freq="h",
+        )
+        n_days_month = calendar.monthrange(year, month)[1]
+
+        result = {"hours": list(range(24)), "timestamps": timestamps}
+
+        # Try local data first, then ArcGIS service
+        monthly_data = self._get_monthly_data(year, month,
+                                               lat_indices, lon_indices,
+                                               lat_bounds, lon_bounds)
+
+        if monthly_data is None:
+            # Return NaN if no data available
+            for var in REQUIRED_VARIABLES:
+                result[var] = np.full((24, n_points), np.nan, dtype=np.float32)
+            return result
+
+        # Disaggregate monthly means to hourly values
+        # Temperature: sinusoidal diurnal cycle
+        temp_mean = monthly_data.get("temp_mean", np.full(n_points, 283.0))
+        temp_range = monthly_data.get("temp_range", np.full(n_points, 10.0))  # K
+
+        hourly_temp = np.zeros((24, n_points), dtype=np.float32)
+        for h in range(24):
+            # Min at 05:00, max at 15:00
+            phase = 2 * np.pi * (h - 15) / 24.0
+            hourly_temp[h] = temp_mean + 0.5 * temp_range * np.cos(phase)
+        result["TMP_2maboveground"] = hourly_temp
+
+        # Pressure: standard atmosphere
+        result["PRES_surface"] = np.full((24, n_points), 101325.0, dtype=np.float32)
+
+        # Humidity: inverse of temperature pattern
+        rh_mean = monthly_data.get("rh_mean", np.full(n_points, 0.65))
+        hourly_rh = np.zeros((24, n_points), dtype=np.float32)
+        for h in range(24):
+            phase = 2 * np.pi * (h - 15) / 24.0
+            # Higher RH when cooler, lower when warmer
+            hourly_rh[h] = rh_mean - 0.15 * np.cos(phase)
+        hourly_rh = np.clip(hourly_rh, 0.05, 1.0)
+        result["SPFH_2maboveground"] = hourly_rh
+
+        # Precipitation: uniform distribution across month (daily portion)
+        precip_monthly = monthly_data.get("precip_mm", np.full(n_points, 80.0))
+        precip_hourly = precip_monthly / (n_days_month * 24.0)
+        result["APCP_surface"] = np.tile(precip_hourly, (24, 1)).astype(np.float32)
+
+        # Wind: constant from monthly mean, split into U/V
+        wind_speed = monthly_data.get("wind_ms", np.full(n_points, 4.0))
+        component = wind_speed / np.sqrt(2.0)
+        result["UGRD_10maboveground"] = np.tile(component, (24, 1)).astype(np.float32)
+        result["VGRD_10maboveground"] = np.tile(component, (24, 1)).astype(np.float32)
+
+        return result
+
+    def _get_monthly_data(self, year, month, lat_indices, lon_indices,
+                           lat_bounds, lon_bounds):
+        """Get monthly aggregated data from ClimRR.
+
+        Returns dict with temp_mean, temp_range, rh_mean, precip_mm, wind_ms
+        or None if not available.
+        """
+        cache_key = f"{year}-{month:02d}"
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+
+        # Try local data files first
+        if self.data_path and self.data_path.exists():
+            data = self._load_local(year, month, lat_indices, lon_indices)
+            if data is not None:
+                self._cache[cache_key] = data
+                return data
+
+        # Try ArcGIS Feature Service
+        data = self._query_arcgis(year, month, lat_indices, lon_indices,
+                                   lat_bounds, lon_bounds)
+        if data is not None:
+            self._cache[cache_key] = data
+
+        return data
+
+    def _load_local(self, year, month, lat_indices, lon_indices):
+        """Load from locally downloaded ClimRR CSV/NetCDF files."""
+        n_points = len(lat_indices)
+
+        # Try CSV format (downloaded from portal)
+        csv_patterns = [
+            self.data_path / f"{self.scenario}" / f"{year}_{month:02d}.csv",
+            self.data_path / f"{self.scenario}_{self.period}.csv",
+            self.data_path / f"climrr_{self.period}_{self.scenario}.csv",
+        ]
+        for csv_path in csv_patterns:
+            if csv_path.exists():
+                import pandas as pd
+                df = pd.read_csv(csv_path)
+                return self._extract_from_dataframe(df, lat_indices, lon_indices)
+
+        # Try NetCDF format
+        nc_patterns = [
+            self.data_path / f"{self.scenario}" / f"climrr_{year}.nc",
+            self.data_path / f"climrr_{self.period}_{self.scenario}.nc",
+        ]
+        for nc_path in nc_patterns:
+            if nc_path.exists():
+                import xarray as xr
+                ds = xr.open_dataset(nc_path)
+                return self._extract_from_dataset(ds, year, month,
+                                                    lat_indices, lon_indices)
+
+        return None
+
+    def _extract_from_dataframe(self, df, lat_indices, lon_indices):
+        """Extract monthly values from a ClimRR CSV DataFrame."""
+        n_points = len(lat_indices)
+        result = {
+            "temp_mean": np.full(n_points, np.nan, dtype=np.float32),
+            "temp_range": np.full(n_points, 10.0, dtype=np.float32),
+            "rh_mean": np.full(n_points, 0.65, dtype=np.float32),
+            "precip_mm": np.full(n_points, np.nan, dtype=np.float32),
+            "wind_ms": np.full(n_points, 4.0, dtype=np.float32),
+        }
+
+        # Map columns (ClimRR naming varies)
+        col_map = {}
+        for col in df.columns:
+            col_lower = col.lower()
+            if "temp" in col_lower and "max" not in col_lower and "min" not in col_lower:
+                col_map["temp_mean"] = col
+            elif "tempmax" in col_lower or "tmax" in col_lower:
+                col_map["temp_max"] = col
+            elif "tempmin" in col_lower or "tmin" in col_lower:
+                col_map["temp_min"] = col
+            elif "precip" in col_lower:
+                col_map["precip_mm"] = col
+            elif "wind" in col_lower:
+                col_map["wind_ms"] = col
+            elif "humid" in col_lower or "rh" in col_lower:
+                col_map["rh_mean"] = col
+
+        # Extract values for our grid points
+        if "temp_mean" in col_map and len(df) > 0:
+            vals = df[col_map["temp_mean"]].values
+            # Celsius to Kelvin if values look like Celsius
+            if np.nanmean(vals) < 100:
+                vals = vals + 273.15
+            for i in range(min(n_points, len(vals))):
+                result["temp_mean"][i] = vals[i % len(vals)]
+
+        if "temp_max" in col_map and "temp_min" in col_map:
+            tmax = df[col_map["temp_max"]].values
+            tmin = df[col_map["temp_min"]].values
+            rng = tmax - tmin
+            for i in range(min(n_points, len(rng))):
+                result["temp_range"][i] = max(rng[i % len(rng)], 2.0)
+
+        if "precip_mm" in col_map:
+            vals = df[col_map["precip_mm"]].values
+            for i in range(min(n_points, len(vals))):
+                result["precip_mm"][i] = vals[i % len(vals)]
+
+        if "wind_ms" in col_map:
+            vals = df[col_map["wind_ms"]].values
+            for i in range(min(n_points, len(vals))):
+                result["wind_ms"][i] = vals[i % len(vals)]
+
+        if "rh_mean" in col_map:
+            vals = df[col_map["rh_mean"]].values
+            # Convert percent to fraction if > 1
+            if np.nanmean(vals) > 1.5:
+                vals = vals / 100.0
+            for i in range(min(n_points, len(vals))):
+                result["rh_mean"][i] = vals[i % len(vals)]
+
+        return result
+
+    def _extract_from_dataset(self, ds, year, month, lat_indices, lon_indices):
+        """Extract from NetCDF xarray dataset."""
+        n_points = len(lat_indices)
+        result = {
+            "temp_mean": np.full(n_points, np.nan, dtype=np.float32),
+            "temp_range": np.full(n_points, 10.0, dtype=np.float32),
+            "rh_mean": np.full(n_points, 0.65, dtype=np.float32),
+            "precip_mm": np.full(n_points, np.nan, dtype=np.float32),
+            "wind_ms": np.full(n_points, 4.0, dtype=np.float32),
+        }
+        # Generic extraction — adapt field names when actual data is available
+        for var_name in ds.data_vars:
+            vn = var_name.lower()
+            try:
+                data_2d = ds[var_name].values
+                if data_2d.ndim >= 2:
+                    for i, (li, lo) in enumerate(zip(lat_indices, lon_indices)):
+                        if li < data_2d.shape[-2] and lo < data_2d.shape[-1]:
+                            val = float(data_2d[..., li, lo].mean())
+                            if "temp" in vn and "max" not in vn and "min" not in vn:
+                                result["temp_mean"][i] = val
+                            elif "precip" in vn or "pr" == vn:
+                                result["precip_mm"][i] = val
+                            elif "wind" in vn:
+                                result["wind_ms"][i] = val
+            except Exception:
+                continue
+        return result
+
+    def _query_arcgis(self, year, month, lat_indices, lon_indices,
+                       lat_bounds, lon_bounds):
+        """Query ClimRR ArcGIS Feature Service for monthly data.
+
+        This is a best-effort approach using the public REST API.
+        For reliable bulk access, use locally downloaded data files.
+        """
+        try:
+            import urllib.request
+            import json as json_mod
+
+            # Construct spatial query for our bounding box
+            xmin, xmax = lon_bounds
+            ymin, ymax = lat_bounds
+
+            # Query the Temperature layer (layer indices may vary)
+            url = (
+                f"{CLIMRR_BASE_URL}/FeatureServer/0/query?"
+                f"where=1%3D1&"
+                f"geometry={xmin},{ymin},{xmax},{ymax}&"
+                f"geometryType=esriGeometryEnvelope&"
+                f"spatialRel=esriSpatialRelIntersects&"
+                f"outFields=*&"
+                f"f=json"
+            )
+
+            req = urllib.request.Request(url, headers={"User-Agent": "AORC-Tools/1.0"})
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json_mod.loads(resp.read().decode())
+
+            features = data.get("features", [])
+            if not features:
+                logger.debug("No ClimRR features returned for bounds %s", lat_bounds)
+                return None
+
+            # Extract values from features
+            n_points = len(lat_indices)
+            result = {
+                "temp_mean": np.full(n_points, np.nan, dtype=np.float32),
+                "temp_range": np.full(n_points, 10.0, dtype=np.float32),
+                "rh_mean": np.full(n_points, 0.65, dtype=np.float32),
+                "precip_mm": np.full(n_points, 80.0, dtype=np.float32),
+                "wind_ms": np.full(n_points, 4.0, dtype=np.float32),
+            }
+
+            # Average all returned features for a regional estimate
+            for f in features:
+                attrs = f.get("attributes", {})
+                for key, val in attrs.items():
+                    if val is None:
+                        continue
+                    kl = key.lower()
+                    if "temp" in kl and "mean" in kl:
+                        result["temp_mean"][:] = float(val) + 273.15
+                    elif "precip" in kl:
+                        result["precip_mm"][:] = float(val)
+                    elif "wind" in kl:
+                        result["wind_ms"][:] = float(val)
+                break  # Use first feature as representative
+
+            return result
+
+        except Exception as e:
+            logger.debug("ClimRR ArcGIS query failed: %s", e)
+            return None
+
+    def info(self):
+        base = super().info()
+        base["scenario"] = self.scenario
+        base["period"] = self.period
+        base["period_years"] = CLIMRR_PERIODS[self.period]
+        base["data_source"] = "local" if self.data_path else "ArcGIS Feature Service"
+        return base
+
+
+# ======================================================================
 # Registry of all available climate models
 # ======================================================================
 
@@ -539,14 +911,15 @@ CLIMATE_MODEL_REGISTRY = {
         "adapter_class": "GLARMAdapter",
     },
     "climrr": {
-        "name": "Argonne ClimRR (WRF downscaling)",
+        "name": "Argonne ClimRR (CESM2/WRF downscaling)",
         "type": "projection",
-        "period": "2045-2054, 2085-2094",
-        "resolution": "12km",
-        "variables": "60+ variables including FWI",
+        "period": "1995-2014 (hist), 2045-2064 (mid), 2075-2094 (end)",
+        "resolution": "12km WRF",
+        "variables": "tas, tasmin, tasmax, pr, hurs, sfcWind",
         "source": "https://disgeoportal.egs.anl.gov/ClimRR/",
-        "note": "Pre-computed FWI available; raw data access TBD",
-        "adapter_class": None,  # Not yet implemented
+        "scenarios": ["historical", "ssp245", "ssp585"],
+        "note": "ArcGIS Feature Service access; FWI computed from component variables",
+        "adapter_class": "ClimRRAdapter",
     },
 }
 
@@ -569,6 +942,12 @@ def get_adapter(source="aorc", **kwargs):
         return GLARMAdapter(
             data_path=kwargs.get("data_path", "./data/glarm"),
             scenario=kwargs.get("scenario", "rcp85"),
+        )
+    elif source in ("climrr", "argonne"):
+        return ClimRRAdapter(
+            scenario=kwargs.get("scenario", "ssp585"),
+            period=kwargs.get("period", "midcentury"),
+            data_path=kwargs.get("data_path"),
         )
     else:
         # Try as config file

@@ -137,6 +137,93 @@ class TestNexGddpCmip6Adapter:
         assert "UKESM1-0-LL" in NEX_GDDP_GCMS
 
 
+class TestClimRRAdapter:
+    def test_init(self):
+        from aorc_tools.climate_model_adapter import ClimRRAdapter
+        adapter = ClimRRAdapter(scenario="ssp245", period="midcentury")
+        assert "SSP245" in adapter.name
+        assert "midcentury" in adapter.name
+
+    def test_invalid_period(self):
+        from aorc_tools.climate_model_adapter import ClimRRAdapter
+        with pytest.raises(ValueError, match="Unknown period"):
+            ClimRRAdapter(period="farfuture")
+
+    def test_time_range(self):
+        from aorc_tools.climate_model_adapter import ClimRRAdapter
+        adapter = ClimRRAdapter(period="midcentury")
+        start, end = adapter.get_time_range()
+        assert start == 2045
+        assert end == 2064
+
+    def test_time_range_historical(self):
+        from aorc_tools.climate_model_adapter import ClimRRAdapter
+        adapter = ClimRRAdapter(period="historical")
+        start, end = adapter.get_time_range()
+        assert start == 1995
+        assert end == 2014
+
+    def test_available_variables(self):
+        from aorc_tools.climate_model_adapter import ClimRRAdapter, REQUIRED_VARIABLES
+        adapter = ClimRRAdapter()
+        vars = adapter.get_available_variables()
+        for v in REQUIRED_VARIABLES:
+            assert v in vars
+
+    def test_no_missing_variables(self):
+        from aorc_tools.climate_model_adapter import ClimRRAdapter
+        adapter = ClimRRAdapter()
+        assert adapter.get_missing_variables() == []
+
+    def test_daily_point_values_structure(self):
+        from aorc_tools.climate_model_adapter import ClimRRAdapter
+        adapter = ClimRRAdapter(period="midcentury")
+        # With no data source, should return NaN-filled arrays
+        result = adapter.get_daily_point_values(
+            2050, 7, 15,
+            np.array([50, 51, 52]),
+            np.array([100, 101, 102]),
+            (46.0, 47.0), (-90.0, -88.0),
+        )
+        assert "hours" in result
+        assert "timestamps" in result
+        assert len(result["hours"]) == 24
+        assert result["TMP_2maboveground"].shape == (24, 3)
+        assert result["PRES_surface"].shape == (24, 3)
+
+    def test_info(self):
+        from aorc_tools.climate_model_adapter import ClimRRAdapter
+        adapter = ClimRRAdapter(scenario="ssp585", period="endcentury")
+        info = adapter.info()
+        assert info["ready"] is True
+        assert info["scenario"] == "ssp585"
+        assert info["period"] == "endcentury"
+        assert info["period_years"] == (2075, 2094)
+
+    def test_factory_climrr(self):
+        from aorc_tools.climate_model_adapter import get_adapter
+        adapter = get_adapter("climrr", scenario="ssp245", period="midcentury")
+        assert "ClimRR" in adapter.name
+
+    def test_factory_argonne_alias(self):
+        from aorc_tools.climate_model_adapter import get_adapter
+        adapter = get_adapter("argonne", scenario="ssp585")
+        assert "ClimRR" in adapter.name
+
+    def test_local_data_path(self):
+        from aorc_tools.climate_model_adapter import ClimRRAdapter
+        with tempfile.TemporaryDirectory() as td:
+            adapter = ClimRRAdapter(data_path=td)
+            info = adapter.info()
+            assert info["data_source"] == "local"
+
+    def test_no_data_path(self):
+        from aorc_tools.climate_model_adapter import ClimRRAdapter
+        adapter = ClimRRAdapter()
+        info = adapter.info()
+        assert info["data_source"] == "ArcGIS Feature Service"
+
+
 class TestGLARMAdapter:
     def test_init(self):
         from aorc_tools.climate_model_adapter import GLARMAdapter

@@ -451,6 +451,9 @@ const UIControls = {
 
         if (srcVal.includes("glarm")) {
             note = `GLARM-Proj1 (Michigan Tech): RegCM4 dynamical downscaling, 18km, daily. ${srcVal.includes("rcp45") ? "RCP 4.5" : "RCP 8.5"} scenario.`;
+        } else if (srcVal.includes("climrr")) {
+            const ssp = srcVal.includes("ssp245") ? "SSP2-4.5 (mid-range)" : "SSP5-8.5 (high emissions)";
+            note = `Argonne ClimRR: CESM2 + WRF dynamical downscaling, 12km. ${ssp} scenario. Mid-century (2045-2064) / End-century (2075-2094).`;
         } else if (srcVal.includes("nex_")) {
             const gcm = srcText;
             const ssp = srcVal.includes("ssp245") ? "SSP2-4.5 (mid-range)" : "SSP5-8.5 (high emissions)";
