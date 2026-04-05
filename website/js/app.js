@@ -18,6 +18,7 @@ const App = {
         if (sourceSelect) {
             sourceSelect.addEventListener("change", (e) => {
                 DataLoader.setBasePath(e.target.value);
+                UIControls._updateProvenance();
                 this.loadPoints();
             });
         }

@@ -457,10 +457,15 @@ def project_extract(points_file, mirror_dir, source, gcm, scenario, output,
     source_name = f"{source}/{gcm}/{scenario}" if source == "nex-gddp-cmip6" else f"{source}/{scenario}"
     mirror = ProjectionMirror(mirror_dir, source_name, adapter, points_df)
 
-    # Auto-generate output directory
+    # Auto-generate output directory matching website data source paths
     if output is None:
-        safe_name = source_name.replace("/", "_")
-        output = f"./data/output_{safe_name}"
+        if source == "nex-gddp-cmip6":
+            output = f"./data/output_nex_{gcm}_{scenario}"
+        elif source == "glarm":
+            output = f"./data/output_glarm_{scenario}"
+        else:
+            safe_name = source_name.replace("/", "_")
+            output = f"./data/output_{safe_name}"
     click.echo(f"Source:  {adapter.name}")
     click.echo(f"Output:  {output}")
     click.echo(f"Years:   {start_year}-{end_year}")
@@ -471,6 +476,12 @@ def project_extract(points_file, mirror_dir, source, gcm, scenario, output,
     for year in range(start_year, end_year + 1):
         click.echo(f"\n--- {year} ---")
         t_yr = t.perf_counter()
+
+        # Auto-download any months not yet cached
+        for m in range(1, 13):
+            if not mirror.is_downloaded(year, m):
+                click.echo(f"  Downloading {year}-{m:02d}...")
+                mirror.download_month(year, m)
 
         def progress(pct, msg):
             click.echo(f"  [{pct:5.1f}%] {msg}")

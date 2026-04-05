@@ -31,9 +31,27 @@
                 <section class="panel" id="source-panel">
                     <h3>Data Source</h3>
                     <select id="data-source-select" class="full-width">
-                        <option value="../data/output" selected>AORC (Historical)</option>
-                        <option value="../data/output_glarm_rcp45">GLARM RCP 4.5 (Projected)</option>
-                        <option value="../data/output_glarm_rcp85">GLARM RCP 8.5 (Projected)</option>
+                        <optgroup label="Historical">
+                            <option value="../data/output" selected>AORC v1.1 (1979–present)</option>
+                        </optgroup>
+                        <optgroup label="GLARM Projections (Michigan Tech)">
+                            <option value="../data/output_glarm_rcp45">GLARM RCP 4.5</option>
+                            <option value="../data/output_glarm_rcp85">GLARM RCP 8.5</option>
+                        </optgroup>
+                        <optgroup label="NEX-GDDP-CMIP6 SSP2-4.5 (Mid-range)">
+                            <option value="../data/output_nex_ACCESS-CM2_ssp245">ACCESS-CM2</option>
+                            <option value="../data/output_nex_GFDL-ESM4_ssp245">GFDL-ESM4</option>
+                            <option value="../data/output_nex_MRI-ESM2-0_ssp245">MRI-ESM2-0</option>
+                            <option value="../data/output_nex_MIROC6_ssp245">MIROC6</option>
+                            <option value="../data/output_nex_EC-Earth3_ssp245">EC-Earth3</option>
+                        </optgroup>
+                        <optgroup label="NEX-GDDP-CMIP6 SSP5-8.5 (High emissions)">
+                            <option value="../data/output_nex_ACCESS-CM2_ssp585">ACCESS-CM2</option>
+                            <option value="../data/output_nex_GFDL-ESM4_ssp585">GFDL-ESM4</option>
+                            <option value="../data/output_nex_MRI-ESM2-0_ssp585">MRI-ESM2-0</option>
+                            <option value="../data/output_nex_MIROC6_ssp585">MIROC6</option>
+                            <option value="../data/output_nex_EC-Earth3_ssp585">EC-Earth3</option>
+                        </optgroup>
                     </select>
                 </section>
 

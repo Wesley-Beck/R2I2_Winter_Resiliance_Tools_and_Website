@@ -40,7 +40,7 @@ const UIControls = {
     init() {
         // Populate year dropdown
         const yearSelect = document.getElementById("year-select");
-        for (let y = 2024; y >= 1979; y--) {
+        for (let y = 2100; y >= 1979; y--) {
             const opt = document.createElement("option");
             opt.value = y;
             opt.textContent = y;
@@ -444,12 +444,25 @@ const UIControls = {
 
     _updateProvenance() {
         const y = this.currentYear;
+        const src = document.getElementById("data-source-select");
+        const srcText = src.options[src.selectedIndex].textContent;
+        const srcVal = src.value;
         let note = "";
-        if (y < 1995) note = "Precip: NEXRAD Stage II + NOWrad + CMORPH satellite. Non-precip: GDAS/MERRA2 reanalysis.";
-        else if (y < 2002) note = "Precip: NEXRAD Stage II hourly. Non-precip: GDAS/MERRA2 reanalysis.";
-        else if (y < 2016) note = "Precip: Stage IV gauge-calibrated NEXRAD. Non-precip: GDAS/MERRA2 reanalysis.";
-        else if (y < 2018) note = "Precip: Stage IV. Non-precip: NLDAS-2 to URMA transition blend.";
-        else note = "Precip: Stage IV gauge-calibrated NEXRAD. Non-precip: URMA reanalysis (2.5 km).";
+
+        if (srcVal.includes("glarm")) {
+            note = `GLARM-Proj1 (Michigan Tech): RegCM4 dynamical downscaling, 18km, daily. ${srcVal.includes("rcp45") ? "RCP 4.5" : "RCP 8.5"} scenario.`;
+        } else if (srcVal.includes("nex_")) {
+            const gcm = srcText;
+            const ssp = srcVal.includes("ssp245") ? "SSP2-4.5 (mid-range)" : "SSP5-8.5 (high emissions)";
+            note = `NEX-GDDP-CMIP6: ${gcm} downscaled to 0.25°, daily. ${ssp} scenario. NASA/BCSD method.`;
+        } else {
+            // AORC historical
+            if (y < 1995) note = "Precip: NEXRAD Stage II + NOWrad + CMORPH satellite. Non-precip: GDAS/MERRA2 reanalysis.";
+            else if (y < 2002) note = "Precip: NEXRAD Stage II hourly. Non-precip: GDAS/MERRA2 reanalysis.";
+            else if (y < 2016) note = "Precip: Stage IV gauge-calibrated NEXRAD. Non-precip: GDAS/MERRA2 reanalysis.";
+            else if (y < 2018) note = "Precip: Stage IV. Non-precip: NLDAS-2 to URMA transition blend.";
+            else note = "Precip: Stage IV gauge-calibrated NEXRAD. Non-precip: URMA reanalysis (2.5 km).";
+        }
         document.getElementById("provenance-note").textContent = note;
     },
 };
