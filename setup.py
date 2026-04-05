@@ -1,0 +1,33 @@
+from setuptools import setup, find_packages
+
+setup(
+    name="aorc_tools",
+    version="0.1.0",
+    description="AORC-based wildfire risk analysis for the Western Upper Peninsula of Michigan",
+    author="R2I2 Winter Resilience",
+    packages=find_packages(),
+    python_requires=">=3.9",
+    install_requires=[
+        "xarray>=2023.0",
+        "zarr>=2.14",
+        "s3fs>=2023.0",
+        "fsspec>=2023.0",
+        "geopandas>=0.13",
+        "shapely>=2.0",
+        "pyproj>=3.5",
+        "osmnx>=1.7",
+        "numpy>=1.24",
+        "pandas>=2.0",
+        "scipy>=1.10",
+        "matplotlib>=3.7",
+        "Pillow>=10.0",
+        "tqdm>=4.65",
+        "click>=8.1",
+        "astral>=3.2",
+    ],
+    entry_points={
+        "console_scripts": [
+            "aorc-tools=aorc_tools.cli:main",
+        ],
+    },
+)

@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Data (large files, not tracked)
+data/output/
+data/shapefiles/*.shp
+data/shapefiles/*.dbf
+data/shapefiles/*.shx
+data/shapefiles/*.prj
+data/static/
+*.nc
+*.zarr/
+
+# Environment
+.env
+.venv/
+env/
+venv/
+
+# Cache
+.aorc_cache/
+*.npz
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
