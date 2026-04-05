@@ -609,6 +609,24 @@ select.full-width {
     border: 1px solid #4a4a3a;
 }
 
+.badge-station {
+    background: #2a3a1a;
+    color: #a0c080;
+    border: 1px solid #3a4a2a;
+}
+
+.badge-radar {
+    background: #3a1a3a;
+    color: #c080c0;
+    border: 1px solid #4a2a4a;
+}
+
+.badge-global {
+    background: #1a3a3a;
+    color: #80c0c0;
+    border: 1px solid #2a4a4a;
+}
+
 /* Model chain display */
 #card-chain {
     font-family: 'Courier New', monospace;

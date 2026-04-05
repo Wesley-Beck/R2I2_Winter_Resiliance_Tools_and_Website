@@ -876,10 +876,253 @@ class ClimRRAdapter(ClimateModelAdapter):
 
 
 # ======================================================================
-# Registry of all available climate models
+# Historical Dataset Adapters (stubs for pipeline integration)
+# ======================================================================
+
+class NLDAS2Adapter(ClimateModelAdapter):
+    """NASA NLDAS-2 land-surface reanalysis forcing.
+
+    Resolution: 0.125° (~12 km), hourly
+    Period: 1979-present
+    Access: NASA GES DISC (OPeNDAP, HTTPS). Requires Earthdata login.
+    Variables: T, precip, RH, wind, SW/LW radiation, surface pressure
+    """
+
+    def __init__(self):
+        self._ds_cache = {}
+
+    @property
+    def name(self):
+        return "NLDAS-2"
+
+    def get_available_variables(self):
+        return list(REQUIRED_VARIABLES) + list(OPTIONAL_VARIABLES)
+
+    def get_time_range(self):
+        return (1979, 2025)
+
+    def get_coordinates(self):
+        lats = np.arange(25.0625, 52.9375 + 0.125, 0.125)
+        lons = np.arange(-124.9375, -67.0625 + 0.125, 0.125)
+        return lats, lons
+
+    def get_daily_point_values(self, year, month, day,
+                                lat_indices, lon_indices,
+                                lat_bounds, lon_bounds):
+        raise NotImplementedError(
+            "NLDAS-2 adapter requires NASA Earthdata credentials. "
+            "Set up with: adapter = NLDAS2Adapter(); adapter.configure(earthdata_token=...)"
+        )
+
+
+class ERA5Adapter(ClimateModelAdapter):
+    """ECMWF ERA5 global reanalysis.
+
+    Resolution: 0.25° (~31 km), hourly. ERA5-Land: 0.1° (~9 km).
+    Period: 1940-present
+    Access: S3: s3://era5-pds/ (AWS Open Data). Also Copernicus CDS API.
+    Variables: 200+ (T, wind, precip, RH, radiation, pressure, soil, snow, CAPE)
+    """
+
+    S3_BUCKET = "era5-pds"
+
+    def __init__(self, product="era5"):
+        self.product = product  # "era5" or "era5land"
+
+    @property
+    def name(self):
+        return "ERA5-Land" if self.product == "era5land" else "ERA5"
+
+    def get_available_variables(self):
+        return list(REQUIRED_VARIABLES) + list(OPTIONAL_VARIABLES)
+
+    def get_time_range(self):
+        if self.product == "era5land":
+            return (1950, 2025)
+        return (1940, 2025)
+
+    def get_coordinates(self):
+        if self.product == "era5land":
+            lats = np.arange(-90.0, 90.1, 0.1)
+            lons = np.arange(-180.0, 180.0, 0.1)
+        else:
+            lats = np.arange(-90.0, 90.1, 0.25)
+            lons = np.arange(-180.0, 180.0, 0.25)
+        return lats, lons
+
+    def get_daily_point_values(self, year, month, day,
+                                lat_indices, lon_indices,
+                                lat_bounds, lon_bounds):
+        raise NotImplementedError(
+            "ERA5 adapter: use s3://era5-pds/ or Copernicus CDS API for data access. "
+            "Install cdsapi package and set up credentials."
+        )
+
+
+class GridMETAdapter(ClimateModelAdapter):
+    """GridMET hybrid gridded observations.
+
+    Resolution: ~4 km (1/24°), daily
+    Period: 1979-present
+    Access: Climatology Lab HTTP, Google Earth Engine
+    Variables: Tmax, Tmin, precip, wind, RH, radiation, ET, VPD,
+              fire indices (ERC, BI, FM100, FM1000)
+
+    Note: GridMET includes pre-computed fire weather indices!
+    """
+
+    def __init__(self, data_path=None):
+        self.data_path = Path(data_path) if data_path else None
+
+    @property
+    def name(self):
+        return "GridMET"
+
+    def get_available_variables(self):
+        return list(REQUIRED_VARIABLES)
+
+    def get_time_range(self):
+        return (1979, 2025)
+
+    def get_coordinates(self):
+        lats = np.arange(25.0 + 1/48, 49.4, 1/24)
+        lons = np.arange(-124.7 + 1/48, -67.0, 1/24)
+        return lats, lons
+
+    def get_daily_point_values(self, year, month, day,
+                                lat_indices, lon_indices,
+                                lat_bounds, lon_bounds):
+        raise NotImplementedError(
+            "GridMET adapter: download NetCDF from "
+            "https://www.climatologylab.org/gridmet.html or use Google Earth Engine."
+        )
+
+
+class DaymetAdapter(ClimateModelAdapter):
+    """Daymet v4 gridded station observations.
+
+    Resolution: 1 km, daily
+    Period: 1980-present (~2-year lag)
+    Access: S3: s3://daymet-v4-na/ (AWS Open Data). Also ORNL DAAC THREDDS.
+    Variables: Tmax, Tmin, precip, shortwave radiation, vapor pressure, SWE
+    """
+
+    S3_BUCKET = "daymet-v4-na"
+
+    def __init__(self):
+        pass
+
+    @property
+    def name(self):
+        return "Daymet v4"
+
+    def get_available_variables(self):
+        # Daymet lacks wind and direct humidity — partial suite
+        return ["TMP_2maboveground", "APCP_surface", "DSWRF_surface"]
+
+    def get_time_range(self):
+        return (1980, 2023)
+
+    def get_coordinates(self):
+        # Daymet uses a Lambert Conformal Conic projection, not lat/lon grid
+        # Approximate with regular 1km grid over CONUS for index purposes
+        lats = np.arange(25.0, 53.0, 0.009)
+        lons = np.arange(-125.0, -66.0, 0.012)
+        return lats, lons
+
+    def get_daily_point_values(self, year, month, day,
+                                lat_indices, lon_indices,
+                                lat_bounds, lon_bounds):
+        raise NotImplementedError(
+            "Daymet adapter: download from s3://daymet-v4-na/ or "
+            "ORNL DAAC THREDDS: https://thredds.daac.ornl.gov/thredds/catalog/ornldaac/2129/"
+        )
+
+
+class HRRRAdapter(ClimateModelAdapter):
+    """NOAA HRRR high-resolution NWP analysis.
+
+    Resolution: 3 km, hourly
+    Period: 2014-present
+    Access: S3: s3://noaa-hrrr-bdp-pds/ (GRIB2), s3://hrrrzarr/ (Zarr)
+    Variables: T, wind, precip, RH, radiation, snow, CAPE, smoke
+    """
+
+    S3_BUCKET_GRIB = "noaa-hrrr-bdp-pds"
+    S3_BUCKET_ZARR = "hrrrzarr"
+
+    def __init__(self):
+        pass
+
+    @property
+    def name(self):
+        return "HRRR"
+
+    def get_available_variables(self):
+        return list(REQUIRED_VARIABLES) + list(OPTIONAL_VARIABLES)
+
+    def get_time_range(self):
+        return (2014, 2025)
+
+    def get_coordinates(self):
+        # HRRR uses Lambert Conformal, approximate for index
+        lats = np.arange(21.0, 53.0, 0.027)
+        lons = np.arange(-134.0, -60.0, 0.033)
+        return lats, lons
+
+    def get_daily_point_values(self, year, month, day,
+                                lat_indices, lon_indices,
+                                lat_bounds, lon_bounds):
+        raise NotImplementedError(
+            "HRRR adapter: use Zarr via s3://hrrrzarr/ (Herbie library recommended) "
+            "or GRIB2 via s3://noaa-hrrr-bdp-pds/"
+        )
+
+
+class MRMSAdapter(ClimateModelAdapter):
+    """NOAA MRMS multi-radar multi-sensor precipitation.
+
+    Resolution: 1 km, 2-minute
+    Period: 2014-present (reprocessed to ~2001)
+    Access: S3: s3://noaa-mrms-pds/ (AWS NODD)
+    Variables: Precipitation rate/accumulation, reflectivity, rotation, hail
+    """
+
+    S3_BUCKET = "noaa-mrms-pds"
+
+    def __init__(self):
+        pass
+
+    @property
+    def name(self):
+        return "MRMS"
+
+    def get_available_variables(self):
+        return ["APCP_surface"]  # Precipitation only
+
+    def get_time_range(self):
+        return (2014, 2025)
+
+    def get_coordinates(self):
+        lats = np.arange(20.0, 55.0, 0.01)
+        lons = np.arange(-130.0, -60.0, 0.01)
+        return lats, lons
+
+    def get_daily_point_values(self, year, month, day,
+                                lat_indices, lon_indices,
+                                lat_bounds, lon_bounds):
+        raise NotImplementedError(
+            "MRMS adapter: precipitation-only. "
+            "Access via s3://noaa-mrms-pds/ or Iowa State Mesonet archive."
+        )
+
+
+# ======================================================================
+# Registry of all available climate models and historical datasets
 # ======================================================================
 
 CLIMATE_MODEL_REGISTRY = {
+    # --- Historical: Reanalysis ---
     "aorc": {
         "name": "NOAA AORC v1.1",
         "type": "reanalysis",
@@ -889,6 +1132,62 @@ CLIMATE_MODEL_REGISTRY = {
         "source": "s3://noaa-nws-aorc-v1-1-1km",
         "adapter_class": "AORCAdapter",
     },
+    "nldas2": {
+        "name": "NASA NLDAS-2",
+        "type": "reanalysis",
+        "period": "1979-present",
+        "resolution": "12km hourly",
+        "variables": "T, precip, RH, wind, radiation, pressure",
+        "source": "NASA GES DISC (OPeNDAP)",
+        "adapter_class": "NLDAS2Adapter",
+    },
+    "era5": {
+        "name": "ECMWF ERA5",
+        "type": "reanalysis",
+        "period": "1940-present",
+        "resolution": "31km hourly",
+        "variables": "200+ vars (full atmospheric)",
+        "source": "s3://era5-pds/",
+        "adapter_class": "ERA5Adapter",
+    },
+    "hrrr": {
+        "name": "NOAA HRRR",
+        "type": "NWP analysis",
+        "period": "2014-present",
+        "resolution": "3km hourly",
+        "variables": "T, wind, precip, RH, radiation, CAPE, smoke",
+        "source": "s3://noaa-hrrr-bdp-pds/ + s3://hrrrzarr/",
+        "adapter_class": "HRRRAdapter",
+    },
+    # --- Historical: Gridded Observations ---
+    "gridmet": {
+        "name": "GridMET",
+        "type": "gridded observations",
+        "period": "1979-present",
+        "resolution": "4km daily",
+        "variables": "T, precip, wind, RH, radiation, fire indices (ERC, BI)",
+        "source": "Climatology Lab / Google Earth Engine",
+        "adapter_class": "GridMETAdapter",
+    },
+    "daymet": {
+        "name": "Daymet v4",
+        "type": "gridded observations",
+        "period": "1980-present",
+        "resolution": "1km daily",
+        "variables": "T, precip, SWrad, vapor pressure, SWE",
+        "source": "s3://daymet-v4-na/",
+        "adapter_class": "DaymetAdapter",
+    },
+    "mrms": {
+        "name": "NOAA MRMS",
+        "type": "radar/satellite",
+        "period": "2014-present",
+        "resolution": "1km sub-hourly",
+        "variables": "Precipitation only",
+        "source": "s3://noaa-mrms-pds/",
+        "adapter_class": "MRMSAdapter",
+    },
+    # --- Future: Projections ---
     "nex-gddp-cmip6": {
         "name": "NASA NEX-GDDP-CMIP6",
         "type": "projection",
@@ -933,6 +1232,18 @@ def get_adapter(source="aorc", **kwargs):
     """
     if source == "aorc":
         return AORCAdapter()
+    elif source == "nldas2":
+        return NLDAS2Adapter()
+    elif source in ("era5", "era5land"):
+        return ERA5Adapter(product=source)
+    elif source == "hrrr":
+        return HRRRAdapter()
+    elif source == "gridmet":
+        return GridMETAdapter(data_path=kwargs.get("data_path"))
+    elif source == "daymet":
+        return DaymetAdapter()
+    elif source == "mrms":
+        return MRMSAdapter()
     elif source in ("nex-gddp-cmip6", "nex-gddp", "cmip6"):
         return NexGddpCmip6Adapter(
             gcm=kwargs.get("gcm", "ACCESS-CM2"),

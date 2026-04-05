@@ -24,7 +24,15 @@ import pytest
 class TestClimateModelRegistry:
     def test_registry_has_all_sources(self):
         from aorc_tools.climate_model_adapter import CLIMATE_MODEL_REGISTRY
+        # Historical datasets
         assert "aorc" in CLIMATE_MODEL_REGISTRY
+        assert "nldas2" in CLIMATE_MODEL_REGISTRY
+        assert "era5" in CLIMATE_MODEL_REGISTRY
+        assert "hrrr" in CLIMATE_MODEL_REGISTRY
+        assert "gridmet" in CLIMATE_MODEL_REGISTRY
+        assert "daymet" in CLIMATE_MODEL_REGISTRY
+        assert "mrms" in CLIMATE_MODEL_REGISTRY
+        # Projection datasets
         assert "nex-gddp-cmip6" in CLIMATE_MODEL_REGISTRY
         assert "glarm" in CLIMATE_MODEL_REGISTRY
         assert "climrr" in CLIMATE_MODEL_REGISTRY
@@ -40,7 +48,94 @@ class TestClimateModelRegistry:
         from aorc_tools.climate_model_adapter import list_models
         models = list_models()
         assert isinstance(models, dict)
-        assert len(models) >= 4
+        assert len(models) >= 10  # 7 historical + 3 projection + 1 climrr
+
+
+class TestHistoricalAdapters:
+    """Tests for historical dataset adapter stubs."""
+
+    def test_factory_nldas2(self):
+        from aorc_tools.climate_model_adapter import get_adapter
+        adapter = get_adapter("nldas2")
+        assert adapter.name == "NLDAS-2"
+        assert adapter.get_time_range() == (1979, 2025)
+
+    def test_factory_era5(self):
+        from aorc_tools.climate_model_adapter import get_adapter
+        adapter = get_adapter("era5")
+        assert adapter.name == "ERA5"
+        assert adapter.get_time_range() == (1940, 2025)
+
+    def test_factory_era5land(self):
+        from aorc_tools.climate_model_adapter import get_adapter
+        adapter = get_adapter("era5land")
+        assert adapter.name == "ERA5-Land"
+        assert adapter.get_time_range() == (1950, 2025)
+
+    def test_factory_hrrr(self):
+        from aorc_tools.climate_model_adapter import get_adapter
+        adapter = get_adapter("hrrr")
+        assert adapter.name == "HRRR"
+        assert adapter.get_time_range() == (2014, 2025)
+
+    def test_factory_gridmet(self):
+        from aorc_tools.climate_model_adapter import get_adapter
+        adapter = get_adapter("gridmet")
+        assert adapter.name == "GridMET"
+        assert adapter.get_time_range() == (1979, 2025)
+
+    def test_factory_daymet(self):
+        from aorc_tools.climate_model_adapter import get_adapter
+        adapter = get_adapter("daymet")
+        assert adapter.name == "Daymet v4"
+        # Daymet has partial variables (no wind/humidity)
+        vars = adapter.get_available_variables()
+        assert "TMP_2maboveground" in vars
+        assert "APCP_surface" in vars
+        missing = adapter.get_missing_variables()
+        assert len(missing) > 0  # Missing wind, humidity, pressure
+
+    def test_factory_mrms(self):
+        from aorc_tools.climate_model_adapter import get_adapter
+        adapter = get_adapter("mrms")
+        assert adapter.name == "MRMS"
+        # MRMS is precip-only
+        vars = adapter.get_available_variables()
+        assert "APCP_surface" in vars
+        assert len(vars) == 1
+
+    def test_nldas2_has_all_variables(self):
+        from aorc_tools.climate_model_adapter import get_adapter
+        adapter = get_adapter("nldas2")
+        assert adapter.get_missing_variables() == []
+
+    def test_era5_has_all_variables(self):
+        from aorc_tools.climate_model_adapter import get_adapter
+        adapter = get_adapter("era5")
+        assert adapter.get_missing_variables() == []
+
+    def test_hrrr_has_all_variables(self):
+        from aorc_tools.climate_model_adapter import get_adapter
+        adapter = get_adapter("hrrr")
+        assert adapter.get_missing_variables() == []
+
+    def test_nldas2_coordinates(self):
+        from aorc_tools.climate_model_adapter import get_adapter
+        adapter = get_adapter("nldas2")
+        lats, lons = adapter.get_coordinates()
+        assert len(lats) > 0
+        assert lats[0] >= 25.0  # CONUS south
+        assert lons[0] <= -124.0  # CONUS west
+
+    def test_stubs_raise_not_implemented(self):
+        """All stub adapters should raise NotImplementedError with helpful message."""
+        from aorc_tools.climate_model_adapter import get_adapter
+        for key in ["nldas2", "era5", "hrrr", "gridmet", "daymet", "mrms"]:
+            adapter = get_adapter(key)
+            with pytest.raises(NotImplementedError):
+                adapter.get_daily_point_values(
+                    2020, 7, 1, np.array([0]), np.array([0]), (46, 47), (-90, -88)
+                )
 
 
 class TestGetAdapter:

@@ -41,7 +41,25 @@
                         <div class="input-group">
                             <label for="hist-dataset-select">Dataset</label>
                             <select id="hist-dataset-select" class="full-width">
-                                <option value="aorc" selected>AORC v1.1 (NOAA)</option>
+                                <optgroup label="Reanalysis (Observed + Modeled)">
+                                    <option value="aorc" selected>AORC v1.1 (NOAA, ~800m, hourly)</option>
+                                    <option value="nldas2">NLDAS-2 (NASA, 12km, hourly)</option>
+                                    <option value="era5">ERA5 (ECMWF, 31km, hourly)</option>
+                                    <option value="era5land">ERA5-Land (ECMWF, 9km, hourly)</option>
+                                    <option value="narr">NARR (NCEP, 32km, 3-hourly)</option>
+                                    <option value="hrrr">HRRR (NOAA, 3km, hourly)</option>
+                                    <option value="rtma">RTMA/URMA (NOAA, 2.5km, hourly)</option>
+                                </optgroup>
+                                <optgroup label="Gridded Observations (Station-interpolated)">
+                                    <option value="prism">PRISM (Oregon State, 800m, daily)</option>
+                                    <option value="daymet">Daymet v4 (ORNL, 1km, daily)</option>
+                                    <option value="gridmet">GridMET (Climatology Lab, 4km, daily)</option>
+                                    <option value="livneh">Livneh (USGS/NCAR, 6km, daily)</option>
+                                </optgroup>
+                                <optgroup label="Radar / Satellite Derived">
+                                    <option value="mrms">MRMS (NOAA, 1km, 2-min precip)</option>
+                                    <option value="cpc">CPC Unified (NOAA, 25km, daily)</option>
+                                </optgroup>
                             </select>
                         </div>
                     </div>
@@ -167,6 +185,10 @@
                         <div class="source-card-row">
                             <span class="card-label">Source:</span>
                             <span id="card-source">NOAA AORC v1.1</span>
+                        </div>
+                        <div class="source-card-row" id="card-access-row">
+                            <span class="card-label">Access:</span>
+                            <span id="card-access">S3: s3://noaa-nws-aorc-v1-1-1km</span>
                         </div>
                     </div>
                 </section>

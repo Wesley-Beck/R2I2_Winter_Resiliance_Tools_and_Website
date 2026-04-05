@@ -105,16 +105,144 @@ function getDownscalingKeys(gcm) {
 // =====================================================================
 
 const HISTORICAL = {
+
+    // --- Reanalysis (Observed + Modeled) ---
+
     aorc: {
-        label: "AORC v1.1 (NOAA)",
         badges:    ["observed", "reanalysis", "hourly", "highres"],
         type:      "Reanalysis — observations assimilated into atmospheric model",
-        spatial:   "~800 m (~0.009°)",
+        spatial:   "~800 m (~0.009\u00b0)",
         temporal:  "Hourly",
-        period:    "1979 – present",
-        variables: "Full suite (T, RH, wind U/V, precip, SW/LW radiation)",
+        period:    "1979 \u2013 present",
+        variables: "Full suite (T, RH, wind U/V, precip, SW/LW radiation, pressure)",
         source:    "NOAA AORC v1.1 (Analysis of Record for Calibration)",
-        chain:     null,
+        access:    "S3: s3://noaa-nws-aorc-v1-1-1km (ZARR)",
+    },
+    nldas2: {
+        badges:    ["observed", "reanalysis", "hourly"],
+        type:      "Land-surface reanalysis — gauge-corrected forcing blend",
+        spatial:   "0.125\u00b0 (~12 km)",
+        temporal:  "Hourly",
+        period:    "1979 \u2013 present",
+        variables: "T, precip, RH, wind, SW/LW radiation, surface pressure",
+        source:    "NASA NLDAS-2 (North American Land Data Assimilation System)",
+        access:    "NASA GES DISC (OPeNDAP, HTTPS). Requires Earthdata login.",
+    },
+    era5: {
+        badges:    ["observed", "reanalysis", "hourly", "global"],
+        type:      "Global reanalysis — full atmospheric model + data assimilation",
+        spatial:   "0.25\u00b0 (~31 km)",
+        temporal:  "Hourly",
+        period:    "1940 \u2013 present",
+        variables: "200+ vars: T, wind (multi-level), precip, RH, radiation, CAPE, soil, snow",
+        source:    "ECMWF ERA5 (Hersbach et al. 2020)",
+        access:    "S3: s3://era5-pds/ (AWS Open Data). Also Copernicus CDS API.",
+    },
+    era5land: {
+        badges:    ["observed", "reanalysis", "hourly"],
+        type:      "Land-focused reanalysis — ERA5 forcing with enhanced land model",
+        spatial:   "0.1\u00b0 (~9 km)",
+        temporal:  "Hourly",
+        period:    "1950 \u2013 present",
+        variables: "T (2m), dewpoint, wind, precip, snow, soil moisture/temp, runoff, evaporation",
+        source:    "ECMWF ERA5-Land (Mu\u00f1oz-Sabater et al. 2021)",
+        access:    "Copernicus CDS API. Also Google Cloud.",
+    },
+    narr: {
+        badges:    ["observed", "reanalysis", "subhourly"],
+        type:      "Regional reanalysis — NCEP Eta model + North American observations",
+        spatial:   "32 km",
+        temporal:  "3-hourly",
+        period:    "1979 \u2013 2024 (discontinued)",
+        variables: "T, precip, wind, RH, radiation, pressure, soil moisture, snow, clouds",
+        source:    "NCEP NARR (North American Regional Reanalysis)",
+        access:    "NCEI THREDDS/OPeNDAP, NOMADS. No S3.",
+    },
+    hrrr: {
+        badges:    ["modeled", "reanalysis", "hourly", "highres"],
+        type:      "NWP analysis — high-resolution model with radar/obs assimilation",
+        spatial:   "3 km",
+        temporal:  "Hourly (analysis + forecasts)",
+        period:    "2014 \u2013 present",
+        variables: "T, wind, precip, RH, radiation, snow, CAPE, visibility, smoke (HRRRsmoke)",
+        source:    "NOAA HRRR (High-Resolution Rapid Refresh)",
+        access:    "S3: s3://noaa-hrrr-bdp-pds/ (GRIB2). Zarr: s3://hrrrzarr/",
+    },
+    rtma: {
+        badges:    ["observed", "reanalysis", "hourly", "highres"],
+        type:      "Mesoscale analysis — observation-corrected model background",
+        spatial:   "2.5 km",
+        temporal:  "Hourly",
+        period:    "2011 \u2013 present",
+        variables: "T, dewpoint, wind U/V + gust, pressure, visibility, ceiling, precip (URMA)",
+        source:    "NOAA RTMA/URMA (Real-Time / UnRestricted Mesoscale Analysis)",
+        access:    "S3: s3://noaa-rtma-pds/, s3://noaa-urma-pds/",
+    },
+
+    // --- Gridded Observations (Station-interpolated) ---
+
+    prism: {
+        badges:    ["observed", "station", "daily", "highres"],
+        type:      "Gridded station obs — topographic regression interpolation",
+        spatial:   "800 m (daily), 4 km (normals)",
+        temporal:  "Daily (monthly normals available)",
+        period:    "1895 \u2013 present (daily from 1981)",
+        variables: "Tmax, Tmin, Tmean, precip, dewpoint, VPD",
+        source:    "PRISM Climate Group (Oregon State University)",
+        access:    "PRISM FTP/HTTP. Also on Google Earth Engine.",
+    },
+    daymet: {
+        badges:    ["observed", "station", "daily", "highres"],
+        type:      "Gridded station obs — Gaussian interpolation with DEM corrections",
+        spatial:   "1 km",
+        temporal:  "Daily",
+        period:    "1980 \u2013 present (~2-year lag)",
+        variables: "Tmax, Tmin, precip, shortwave radiation, vapor pressure, SWE, day length",
+        source:    "Daymet v4 (ORNL DAAC, Thornton et al.)",
+        access:    "S3: s3://daymet-v4-na/ (AWS Open Data). Also THREDDS.",
+    },
+    gridmet: {
+        badges:    ["observed", "station", "daily"],
+        type:      "Hybrid gridded obs — PRISM climate + NLDAS-2 meteorology",
+        spatial:   "~4 km (1/24\u00b0)",
+        temporal:  "Daily",
+        period:    "1979 \u2013 present",
+        variables: "Tmax, Tmin, precip, wind, RH, radiation, ET, VPD, fire indices (ERC, BI, FM100)",
+        source:    "GridMET (Climatology Lab, Abatzoglou 2013)",
+        access:    "Climatology Lab HTTP. Also Google Earth Engine.",
+    },
+    livneh: {
+        badges:    ["observed", "station", "daily"],
+        type:      "Gridded station obs — interpolated with SNOTEL/COOP gauge corrections",
+        spatial:   "1/16\u00b0 (~6 km)",
+        temporal:  "Daily",
+        period:    "1915 \u2013 2015 (static, no updates)",
+        variables: "Tmax, Tmin, precip, wind",
+        source:    "Livneh et al. (USGS/NCAR)",
+        access:    "NCAR Climate Data Gateway, USGS ScienceBase.",
+    },
+
+    // --- Radar / Satellite Derived ---
+
+    mrms: {
+        badges:    ["observed", "radar", "subhourly", "highres"],
+        type:      "Multi-sensor blend — NEXRAD radar + gauges + satellite",
+        spatial:   "1 km",
+        temporal:  "2-minute (precipitation)",
+        period:    "2014 \u2013 present (reprocessed to ~2001)",
+        variables: "Precip rate/accumulation, radar reflectivity, rotation, hail indicators",
+        source:    "NOAA MRMS (Multi-Radar Multi-Sensor)",
+        access:    "S3: s3://noaa-mrms-pds/ (AWS NODD). Also Iowa Mesonet archive.",
+    },
+    cpc: {
+        badges:    ["observed", "station", "daily"],
+        type:      "Gridded gauge obs — optimal interpolation of global station network",
+        spatial:   "0.25\u00b0 (~25 km, CONUS precip) / 0.5\u00b0 (global temp)",
+        temporal:  "Daily",
+        period:    "1948 \u2013 present (temp) / 1979 \u2013 present (precip)",
+        variables: "Precipitation (unified gauge); separately: Tmax, Tmin",
+        source:    "NOAA CPC Unified (Climate Prediction Center)",
+        access:    "CPC FTP. Also NOAA PSL OPeNDAP.",
     },
 };
 
@@ -126,9 +254,13 @@ const BADGE_CONFIG = {
     observed:    { text: "Observed",       css: "badge-observed" },
     reanalysis:  { text: "Reanalysis",     css: "badge-reanalysis" },
     modeled:     { text: "Modeled",        css: "badge-modeled" },
+    station:     { text: "Station-based",  css: "badge-station" },
+    radar:       { text: "Radar/Satellite",css: "badge-radar" },
     statistical: { text: "Statistical DS", css: "badge-statistical" },
     dynamical:   { text: "Dynamical RCM",  css: "badge-dynamical" },
+    global:      { text: "Global",         css: "badge-global" },
     hourly:      { text: "Hourly",         css: "badge-hourly" },
+    subhourly:   { text: "Sub-hourly",     css: "badge-hourly" },
     daily:       { text: "Daily",          css: "badge-daily" },
     highres:     { text: "High-res",       css: "badge-highres" },
     coarse:      { text: "~25 km",         css: "badge-coarse" },
@@ -243,15 +375,17 @@ const App = {
     // ------------------------------------------------------------------
 
     _updateInfoCard() {
-        const badgesEl = document.getElementById("card-badges");
-        const typeEl   = document.getElementById("card-type");
-        const spatEl   = document.getElementById("card-resolution");
-        const tempEl   = document.getElementById("card-temporal");
-        const periodEl = document.getElementById("card-period");
-        const varsEl   = document.getElementById("card-variables");
-        const sourceEl = document.getElementById("card-source");
-        const chainRow = document.getElementById("card-chain-row");
-        const chainEl  = document.getElementById("card-chain");
+        const badgesEl  = document.getElementById("card-badges");
+        const typeEl    = document.getElementById("card-type");
+        const spatEl    = document.getElementById("card-resolution");
+        const tempEl    = document.getElementById("card-temporal");
+        const periodEl  = document.getElementById("card-period");
+        const varsEl    = document.getElementById("card-variables");
+        const sourceEl  = document.getElementById("card-source");
+        const chainRow  = document.getElementById("card-chain-row");
+        const chainEl   = document.getElementById("card-chain");
+        const accessRow = document.getElementById("card-access-row");
+        const accessEl  = document.getElementById("card-access");
 
         let info;
 
@@ -288,6 +422,14 @@ const App = {
         periodEl.textContent = info.period;
         varsEl.textContent   = info.variables;
         sourceEl.textContent = info.source;
+
+        // Access method (historical datasets)
+        if (info.access) {
+            accessRow.style.display = "";
+            accessEl.textContent = info.access;
+        } else {
+            accessRow.style.display = "none";
+        }
     },
 
     // ------------------------------------------------------------------
@@ -298,7 +440,8 @@ const App = {
         let path;
 
         if (this._mode === "historical") {
-            path = "../data/output";
+            const ds = document.getElementById("hist-dataset-select").value;
+            path = (ds === "aorc") ? "../data/output" : `../data/output_${ds}`;
         } else {
             const gcm      = document.getElementById("gcm-select").value;
             const dsKey    = document.getElementById("downscaling-select").value;
@@ -326,7 +469,10 @@ const App = {
 
     getSourceInfo() {
         if (this._mode === "historical") {
-            return { mode: "historical", dataset: "aorc" };
+            return {
+                mode: "historical",
+                dataset: document.getElementById("hist-dataset-select").value,
+            };
         }
         return {
             mode:         "future",

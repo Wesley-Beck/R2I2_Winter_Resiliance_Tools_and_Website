@@ -463,6 +463,52 @@ const UIControls = {
                 note = `Modeled: ${gcm} → BCSD statistical (0.25°). ${ssp}. Source: NASA NEX-GDDP-CMIP6.`;
             }
         } else {
+            const ds = src.dataset || "aorc";
+            const HIST_PROVENANCE = {
+                aorc: () => {
+                    if (y < 1995) return "AORC: Stage II + CMORPH satellite precip. GDAS/MERRA2 non-precip.";
+                    if (y < 2002) return "AORC: NEXRAD Stage II hourly precip. GDAS/MERRA2 non-precip.";
+                    if (y < 2016) return "AORC: Stage IV gauge-calibrated NEXRAD. GDAS/MERRA2 non-precip.";
+                    if (y < 2018) return "AORC: Stage IV precip. NLDAS-2 to URMA transition.";
+                    return "AORC: Stage IV gauge-calibrated NEXRAD. URMA reanalysis (2.5 km).";
+                },
+                nldas2:   () => "NLDAS-2: Gauge-corrected precip. GDAS reanalysis + GOES radiation. Land-surface forcing.",
+                era5:     () => "ERA5: ECMWF 4D-Var data assimilation. Global observations from surface, radiosonde, satellite.",
+                era5land: () => "ERA5-Land: ERA5 atmospheric forcing driving offline HTESSEL land-surface model.",
+                narr:     () => "NARR: NCEP Eta model with 3-hourly data assimilation over North America. Discontinued 2024.",
+                hrrr:     () => "HRRR: 3km NWP with radar reflectivity + surface obs assimilation. 15-min update cycle.",
+                rtma:     () => "RTMA/URMA: 2.5km analysis blending model background with real-time surface observations.",
+                prism:    () => "PRISM: Station obs interpolated with physiographic weighting (elevation, coastal, orographic).",
+                daymet:   () => "Daymet: Station obs interpolated via truncated Gaussian weighting with DEM correction.",
+                gridmet:  () => "GridMET: PRISM temperature/precip + NLDAS-2 wind/humidity/radiation. Hybrid product.",
+                livneh:   () => "Livneh: Station obs interpolated (Shepard’s method). Covers 1915–2015, no updates.",
+                mrms:     () => "MRMS: Dual-pol NEXRAD radar + ~7,000 rain gauges + satellite QPE. 2-min updates.",
+                cpc:      () => "CPC Unified: Optimal interpolation of global cooperative observer stations.",
+            };
+            const fn = HIST_PROVENANCE[ds] || HIST_PROVENANCE.aorc;
+            note = fn();
+        }
+        document.getElementById("provenance-note").textContent = note;
+    },
+};
+        let note = "";
+
+        if (src.mode === "future") {
+            const ds = src.downscaling || "bcsd";
+            const scen = src.scenario || "";
+            const gcm = src.gcm || "";
+
+            if (ds === "regcm4") {
+                const rcp = scen === "rcp45" ? "RCP 4.5" : "RCP 8.5";
+                note = `Modeled: GCM ensemble → RegCM4 dynamical RCM (18 km). ${rcp}. Source: GLARM-Proj1.`;
+            } else if (ds === "wrf") {
+                const ssp = scen === "ssp245" ? "SSP2-4.5" : "SSP5-8.5";
+                note = `Modeled: ${gcm} → WRF dynamical RCM (12 km). ${ssp}. Source: Argonne ClimRR.`;
+            } else {
+                const ssp = scen === "ssp245" ? "SSP2-4.5" : "SSP5-8.5";
+                note = `Modeled: ${gcm} → BCSD statistical (0.25°). ${ssp}. Source: NASA NEX-GDDP-CMIP6.`;
+            }
+        } else {
             // Historical AORC — provenance varies by data era
             if (y < 1995) note = "Observed + reanalysis: Stage II + CMORPH satellite precip. GDAS/MERRA2 non-precip fields.";
             else if (y < 2002) note = "Observed + reanalysis: NEXRAD Stage II hourly precip. GDAS/MERRA2 non-precip fields.";
