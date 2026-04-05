@@ -444,31 +444,31 @@ const UIControls = {
 
     _updateProvenance() {
         const y = this.currentYear;
-        const mode = App._mode || "historical";
+        const src = (typeof App !== "undefined" && App.getSourceInfo) ? App.getSourceInfo() : { mode: "historical" };
         let note = "";
 
-        if (mode === "future") {
-            const gcm = document.getElementById("gcm-select")?.value || "";
-            const dsKey = document.getElementById("downscaling-select")?.value || "";
-            const scenario = document.getElementById("scenario-select")?.value || "";
+        if (src.mode === "future") {
+            const ds = src.downscaling || "bcsd";
+            const scen = src.scenario || "";
+            const gcm = src.gcm || "";
 
-            if (dsKey === "regcm4") {
-                const rcp = scenario === "rcp45" ? "RCP 4.5" : "RCP 8.5";
-                note = `Modeled: GCM ensemble → RegCM4 (18km). ${rcp}. Data: GLARM-Proj1.`;
-            } else if (dsKey === "wrf") {
-                const ssp = scenario === "ssp245" ? "SSP2-4.5" : "SSP5-8.5";
-                note = `Modeled: ${gcm} → WRF (12km). ${ssp}. Data: Argonne ClimRR.`;
+            if (ds === "regcm4") {
+                const rcp = scen === "rcp45" ? "RCP 4.5" : "RCP 8.5";
+                note = `Modeled: GCM ensemble → RegCM4 dynamical RCM (18 km). ${rcp}. Source: GLARM-Proj1.`;
+            } else if (ds === "wrf") {
+                const ssp = scen === "ssp245" ? "SSP2-4.5" : "SSP5-8.5";
+                note = `Modeled: ${gcm} → WRF dynamical RCM (12 km). ${ssp}. Source: Argonne ClimRR.`;
             } else {
-                const ssp = scenario === "ssp245" ? "SSP2-4.5" : "SSP5-8.5";
-                note = `Modeled: ${gcm} → BCSD (0.25°). ${ssp}. Data: NASA NEX-GDDP-CMIP6.`;
+                const ssp = scen === "ssp245" ? "SSP2-4.5" : "SSP5-8.5";
+                note = `Modeled: ${gcm} → BCSD statistical (0.25°). ${ssp}. Source: NASA NEX-GDDP-CMIP6.`;
             }
         } else {
-            // AORC provenance varies by era
-            if (y < 1995) note = "Observed/reanalysis: NEXRAD Stage II + CMORPH precip. GDAS/MERRA2 non-precip.";
-            else if (y < 2002) note = "Observed/reanalysis: NEXRAD Stage II hourly precip. GDAS/MERRA2 non-precip.";
-            else if (y < 2016) note = "Observed/reanalysis: Stage IV gauge-calibrated NEXRAD. GDAS/MERRA2 non-precip.";
-            else if (y < 2018) note = "Observed/reanalysis: Stage IV precip. NLDAS-2 to URMA transition blend.";
-            else note = "Observed/reanalysis: Stage IV gauge-calibrated NEXRAD. URMA reanalysis (2.5 km).";
+            // Historical AORC — provenance varies by data era
+            if (y < 1995) note = "Observed + reanalysis: Stage II + CMORPH satellite precip. GDAS/MERRA2 non-precip fields.";
+            else if (y < 2002) note = "Observed + reanalysis: NEXRAD Stage II hourly precip. GDAS/MERRA2 non-precip fields.";
+            else if (y < 2016) note = "Observed + reanalysis: Stage IV gauge-calibrated NEXRAD precip. GDAS/MERRA2 non-precip.";
+            else if (y < 2018) note = "Observed + reanalysis: Stage IV precip. NLDAS-2 to URMA transition blend.";
+            else note = "Observed + reanalysis: Stage IV gauge-calibrated NEXRAD precip. URMA reanalysis (2.5 km).";
         }
         document.getElementById("provenance-note").textContent = note;
     },

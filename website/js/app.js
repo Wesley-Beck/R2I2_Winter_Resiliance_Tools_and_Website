@@ -1,21 +1,24 @@
 /**
  * Main application — initializes map, loads point index, wires up UI.
  *
- * Data source split into Historical (observed) and Future (modeled):
+ * Data source UI broken into two modes:
  *
- *   Historical:  AORC reanalysis — no sub-options
- *   Future:      GCM → Downscaling Method → Emissions Scenario
+ *   HISTORICAL
+ *     - Dataset selector (AORC — expandable later)
  *
- * The downscaling dropdown adapts to the selected GCM:
- *   - CMIP6 GCMs  → BCSD statistical (NEX-GDDP-CMIP6)
- *   - CESM2       → WRF dynamical (ClimRR / Argonne)
- *   - RegCM4      → RegCM4 dynamical (GLARM / Michigan Tech)
+ *   FUTURE
+ *     - Projection Period (near-term / mid-century / end-century)
+ *     - Global Climate Model (GCM), grouped by modeling institution
+ *     - Downscaling Method (statistical BCSD / dynamical WRF / RegCM4)
+ *     - Emissions Scenario (SSP / RCP)
  *
- * This makes the GCM→RCM chain explicit and switchable.
+ * Each combination updates a Data Characteristics card showing:
+ *     badges, data type, spatial resolution, temporal resolution,
+ *     available period, modeling chain, variable completeness, source.
  */
 
 // =====================================================================
-// Downscaling methods available per GCM
+// GCM list (for mapping to downscaling methods)
 // =====================================================================
 
 const CMIP6_GCMS = [
@@ -28,75 +31,107 @@ const CMIP6_GCMS = [
     "NorESM2-MM", "TaiESM1", "UKESM1-0-LL",
 ];
 
-/**
- * Each downscaling method defines: label, key (for path building),
- * scenarios, and the info card fields.
- */
-const DOWNSCALING_METHODS = {
-    "bcsd": {
+// =====================================================================
+// Downscaling method metadata
+// =====================================================================
+
+const DOWNSCALING = {
+    bcsd: {
         label: "BCSD Statistical (NEX-GDDP-CMIP6)",
-        key: "nex-gddp-cmip6",
+        dataKey: "nex-gddp-cmip6",
         scenarios: [
-            { value: "ssp245", label: "SSP2-4.5 (mid-range emissions)" },
-            { value: "ssp585", label: "SSP5-8.5 (high emissions)" },
+            { value: "ssp245", label: "SSP2-4.5 — mid-range emissions" },
+            { value: "ssp585", label: "SSP5-8.5 — high emissions" },
         ],
-        badge: "statistical",
-        badgeText: "Statistically Downscaled",
-        type: "Statistical downscaling (BCSD)",
-        resolution: "0.25° (~25 km), daily",
-        period: "2015 – 2100",
-        source: "NASA NEX-GDDP-CMIP6",
+        info: {
+            badges:    ["modeled", "statistical", "daily", "coarse"],
+            type:      "GCM output, bias-corrected spatial disaggregation (BCSD)",
+            spatial:   "0.25° (~25 km)",
+            temporal:  "Daily (disaggregated to hourly for fire indices)",
+            period:    "2015 – 2100",
+            variables: "T, RH, precip, wind (no radiation)",
+            source:    "NASA NEX-GDDP-CMIP6 (Thrasher et al. 2022)",
+        },
+        chain: (gcm) => `${gcm} → BCSD statistical → 0.25° grid`,
     },
-    "wrf": {
-        label: "WRF Dynamical (ClimRR / Argonne)",
-        key: "climrr",
+    wrf: {
+        label: "WRF Dynamical RCM (ClimRR / Argonne)",
+        dataKey: "climrr",
         scenarios: [
-            { value: "ssp245", label: "SSP2-4.5 (mid-range emissions)" },
-            { value: "ssp585", label: "SSP5-8.5 (high emissions)" },
+            { value: "ssp245", label: "SSP2-4.5 — mid-range emissions" },
+            { value: "ssp585", label: "SSP5-8.5 — high emissions" },
         ],
-        badge: "dynamical",
-        badgeText: "Dynamically Downscaled (RCM)",
-        type: "Regional climate model (WRF)",
-        resolution: "12 km, daily",
-        period: "2045 – 2094",
-        source: "Argonne ClimRR",
+        info: {
+            badges:    ["modeled", "dynamical", "daily"],
+            type:      "Dynamical downscaling — WRF regional climate model",
+            spatial:   "12 km",
+            temporal:  "Daily (disaggregated to hourly for fire indices)",
+            period:    "Hist: 1995–2014 | Mid: 2045–2064 | End: 2075–2094",
+            variables: "T, Tmin, Tmax, precip, wind, humidity",
+            source:    "Argonne National Lab ClimRR (CESM2 → WRF)",
+        },
+        chain: (gcm) => `${gcm} → WRF (Argonne) → 12 km grid`,
     },
-    "regcm4": {
-        label: "RegCM4 Dynamical (GLARM / Michigan Tech)",
-        key: "glarm",
+    regcm4: {
+        label: "RegCM4 Dynamical RCM (GLARM / Michigan Tech)",
+        dataKey: "glarm",
         scenarios: [
-            { value: "rcp45", label: "RCP 4.5" },
-            { value: "rcp85", label: "RCP 8.5" },
+            { value: "rcp45", label: "RCP 4.5 — stabilization pathway" },
+            { value: "rcp85", label: "RCP 8.5 — high emissions pathway" },
         ],
-        badge: "dynamical",
-        badgeText: "Dynamically Downscaled (RCM)",
-        type: "Regional climate model (RegCM4)",
-        resolution: "18 km, daily",
-        period: "1981 – 2099",
-        source: "GLARM-Proj1 (Michigan Tech)",
+        info: {
+            badges:    ["modeled", "dynamical", "daily"],
+            type:      "Dynamical downscaling — RegCM4 regional climate model",
+            spatial:   "18 km (atmosphere), 1–4 km (lake surface)",
+            temporal:  "Daily (disaggregated to hourly for fire indices)",
+            period:    "1981 – 2099",
+            variables: "T, Q, wind, precip, SW/LW radiation",
+            source:    "GLARM-Proj1, Michigan Tech (Xue et al. 2022)",
+        },
+        chain: () => "GCM ensemble → RegCM4 → 18 km grid",
     },
 };
 
-/** Map each GCM to available downscaling methods. */
-function getDownscalingForGCM(gcm) {
+/** Available downscaling methods for a given GCM. */
+function getDownscalingKeys(gcm) {
     if (CMIP6_GCMS.includes(gcm)) return ["bcsd"];
-    if (gcm === "CESM2")           return ["wrf"];
-    if (gcm === "RegCM4-driven")   return ["regcm4"];
+    if (gcm === "CESM2")          return ["wrf"];
+    if (gcm === "RegCM4-driven")  return ["regcm4"];
     return ["bcsd"];
 }
 
 // =====================================================================
-// Historical data info
+// Historical dataset metadata
 // =====================================================================
 
-const HISTORICAL_INFO = {
-    badge: "observed",
-    badgeText: "Observed + Modeled",
-    type: "Reanalysis",
-    resolution: "~800m (~0.009°), hourly",
-    period: "1979 – present",
-    source: "NOAA AORC v1.1",
-    chain: null,
+const HISTORICAL = {
+    aorc: {
+        label: "AORC v1.1 (NOAA)",
+        badges:    ["observed", "reanalysis", "hourly", "highres"],
+        type:      "Reanalysis — observations assimilated into atmospheric model",
+        spatial:   "~800 m (~0.009°)",
+        temporal:  "Hourly",
+        period:    "1979 – present",
+        variables: "Full suite (T, RH, wind U/V, precip, SW/LW radiation)",
+        source:    "NOAA AORC v1.1 (Analysis of Record for Calibration)",
+        chain:     null,
+    },
+};
+
+// =====================================================================
+// Badge display names and CSS class
+// =====================================================================
+
+const BADGE_CONFIG = {
+    observed:    { text: "Observed",       css: "badge-observed" },
+    reanalysis:  { text: "Reanalysis",     css: "badge-reanalysis" },
+    modeled:     { text: "Modeled",        css: "badge-modeled" },
+    statistical: { text: "Statistical DS", css: "badge-statistical" },
+    dynamical:   { text: "Dynamical RCM",  css: "badge-dynamical" },
+    hourly:      { text: "Hourly",         css: "badge-hourly" },
+    daily:       { text: "Daily",          css: "badge-daily" },
+    highres:     { text: "High-res",       css: "badge-highres" },
+    coarse:      { text: "~25 km",         css: "badge-coarse" },
 };
 
 // =====================================================================
@@ -111,138 +146,154 @@ const App = {
         MapLayer.initMap();
         UIControls.init();
         this._initSourceSelectors();
+        this._updateInfoCard();
         await this.loadPoints();
     },
 
     // ------------------------------------------------------------------
-    // Source selector wiring
+    // Wire up all source selectors
     // ------------------------------------------------------------------
 
     _initSourceSelectors() {
-        // Mode toggle buttons
+        const self = this;
+
+        // Historical / Future toggle
         document.querySelectorAll(".mode-btn").forEach(btn => {
             btn.addEventListener("click", () => {
                 document.querySelectorAll(".mode-btn").forEach(b => b.classList.remove("active"));
                 btn.classList.add("active");
-                this._mode = btn.dataset.mode;
+                self._mode = btn.dataset.mode;
+                document.getElementById("historical-options").style.display =
+                    self._mode === "historical" ? "" : "none";
                 document.getElementById("future-options").style.display =
-                    (this._mode === "future") ? "" : "none";
-                this._updateDownscalingOptions();
-                this._updateInfoCard();
-                this._applySource();
+                    self._mode === "future" ? "" : "none";
+                self._onFilterChange();
             });
         });
 
-        // GCM changed → update available downscaling methods
-        document.getElementById("gcm-select").addEventListener("change", () => {
-            this._updateDownscalingOptions();
-            this._updateInfoCard();
-            this._applySource();
-        });
+        // Historical dataset change
+        document.getElementById("hist-dataset-select")
+            .addEventListener("change", () => self._onFilterChange());
 
-        // Downscaling changed → update scenarios + info
-        document.getElementById("downscaling-select").addEventListener("change", () => {
-            this._updateScenarioOptions();
-            this._updateInfoCard();
-            this._applySource();
-        });
+        // Future: all four filters trigger the same update
+        ["period-select", "gcm-select", "downscaling-select", "scenario-select"]
+            .forEach(id => {
+                document.getElementById(id).addEventListener("change", () => {
+                    // GCM change cascades to downscaling → scenarios
+                    if (id === "gcm-select") self._populateDownscaling();
+                    if (id === "gcm-select" || id === "downscaling-select") self._populateScenarios();
+                    self._onFilterChange();
+                });
+            });
 
-        // Scenario changed → reload data
-        document.getElementById("scenario-select").addEventListener("change", () => {
-            this._updateInfoCard();
-            this._applySource();
-        });
-
-        // Initial population
-        this._updateDownscalingOptions();
-        this._updateInfoCard();
+        // Initial cascade
+        this._populateDownscaling();
+        this._populateScenarios();
     },
 
-    /** Populate downscaling dropdown based on selected GCM. */
-    _updateDownscalingOptions() {
-        const gcm = document.getElementById("gcm-select").value;
-        const dsSelect = document.getElementById("downscaling-select");
-        const methods = getDownscalingForGCM(gcm);
-        const prev = dsSelect.value;
+    /** Common handler: any filter changed → update card + load data. */
+    _onFilterChange() {
+        this._updateInfoCard();
+        this._applySource();
+    },
 
-        dsSelect.innerHTML = "";
-        methods.forEach(key => {
-            const m = DOWNSCALING_METHODS[key];
-            if (!m) return;
+    // ------------------------------------------------------------------
+    // Cascading dropdown population
+    // ------------------------------------------------------------------
+
+    _populateDownscaling() {
+        const gcm = document.getElementById("gcm-select").value;
+        const sel = document.getElementById("downscaling-select");
+        const prev = sel.value;
+        sel.innerHTML = "";
+
+        getDownscalingKeys(gcm).forEach(key => {
+            const d = DOWNSCALING[key];
+            if (!d) return;
             const opt = document.createElement("option");
             opt.value = key;
-            opt.textContent = m.label;
+            opt.textContent = d.label;
             if (key === prev) opt.selected = true;
-            dsSelect.appendChild(opt);
+            sel.appendChild(opt);
         });
 
-        this._updateScenarioOptions();
+        this._populateScenarios();
     },
 
-    /** Populate scenario dropdown based on selected downscaling method. */
-    _updateScenarioOptions() {
+    _populateScenarios() {
         const dsKey = document.getElementById("downscaling-select").value;
-        const method = DOWNSCALING_METHODS[dsKey];
-        const scenSelect = document.getElementById("scenario-select");
-        const prev = scenSelect.value;
+        const d = DOWNSCALING[dsKey];
+        const sel = document.getElementById("scenario-select");
+        const prev = sel.value;
+        sel.innerHTML = "";
 
-        scenSelect.innerHTML = "";
-        if (method) {
-            method.scenarios.forEach(s => {
+        if (d) {
+            d.scenarios.forEach(s => {
                 const opt = document.createElement("option");
                 opt.value = s.value;
                 opt.textContent = s.label;
                 if (s.value === prev) opt.selected = true;
-                scenSelect.appendChild(opt);
+                sel.appendChild(opt);
             });
         }
     },
 
-    /** Update the info card to reflect current data characteristics. */
+    // ------------------------------------------------------------------
+    // Data characteristics card
+    // ------------------------------------------------------------------
+
     _updateInfoCard() {
-        const badgeEl   = document.querySelector(".source-badge");
-        const typeEl    = document.getElementById("card-type");
-        const resEl     = document.getElementById("card-resolution");
-        const periodEl  = document.getElementById("card-period");
-        const sourceEl  = document.getElementById("card-source");
-        const chainRow  = document.getElementById("card-chain-row");
-        const chainEl   = document.getElementById("card-chain");
+        const badgesEl = document.getElementById("card-badges");
+        const typeEl   = document.getElementById("card-type");
+        const spatEl   = document.getElementById("card-resolution");
+        const tempEl   = document.getElementById("card-temporal");
+        const periodEl = document.getElementById("card-period");
+        const varsEl   = document.getElementById("card-variables");
+        const sourceEl = document.getElementById("card-source");
+        const chainRow = document.getElementById("card-chain-row");
+        const chainEl  = document.getElementById("card-chain");
+
+        let info;
 
         if (this._mode === "historical") {
-            badgeEl.className = "source-badge badge-observed";
-            badgeEl.textContent = HISTORICAL_INFO.badgeText;
-            typeEl.textContent = HISTORICAL_INFO.type;
-            resEl.textContent = HISTORICAL_INFO.resolution;
-            periodEl.innerHTML = HISTORICAL_INFO.period;
-            sourceEl.textContent = HISTORICAL_INFO.source;
+            const dsKey = document.getElementById("hist-dataset-select").value;
+            info = HISTORICAL[dsKey] || HISTORICAL.aorc;
             chainRow.style.display = "none";
-            return;
+        } else {
+            const gcm   = document.getElementById("gcm-select").value;
+            const dsKey = document.getElementById("downscaling-select").value;
+            const d     = DOWNSCALING[dsKey];
+            if (!d) return;
+            info = d.info;
+
+            // Modeling chain
+            chainRow.style.display = "";
+            chainEl.textContent = d.chain(gcm);
         }
 
-        const gcm    = document.getElementById("gcm-select").value;
-        const dsKey  = document.getElementById("downscaling-select").value;
-        const method = DOWNSCALING_METHODS[dsKey];
-        if (!method) return;
+        // Render badges
+        badgesEl.innerHTML = "";
+        (info.badges || []).forEach(key => {
+            const bc = BADGE_CONFIG[key];
+            if (!bc) return;
+            const span = document.createElement("span");
+            span.className = `source-badge ${bc.css}`;
+            span.textContent = bc.text;
+            badgesEl.appendChild(span);
+        });
 
-        badgeEl.className = `source-badge badge-${method.badge}`;
-        badgeEl.textContent = method.badgeText;
-        typeEl.textContent = method.type;
-        resEl.textContent = method.resolution;
-        periodEl.textContent = method.period;
-        sourceEl.textContent = method.source;
-
-        // Show the modeling chain: GCM → downscaling → local grid
-        chainRow.style.display = "";
-        if (dsKey === "bcsd") {
-            chainEl.textContent = `${gcm} → BCSD → 0.25° grid`;
-        } else if (dsKey === "wrf") {
-            chainEl.textContent = `${gcm} → WRF → 12 km grid`;
-        } else if (dsKey === "regcm4") {
-            chainEl.textContent = `GCM ensemble → RegCM4 → 18 km grid`;
-        }
+        typeEl.textContent   = info.type;
+        spatEl.textContent   = info.spatial;
+        tempEl.textContent   = info.temporal;
+        periodEl.textContent = info.period;
+        varsEl.textContent   = info.variables;
+        sourceEl.textContent = info.source;
     },
 
-    /** Build the data path from selections and reload. */
+    // ------------------------------------------------------------------
+    // Build data path from selections and load
+    // ------------------------------------------------------------------
+
     _applySource() {
         let path;
 
@@ -252,14 +303,14 @@ const App = {
             const gcm      = document.getElementById("gcm-select").value;
             const dsKey    = document.getElementById("downscaling-select").value;
             const scenario = document.getElementById("scenario-select").value;
-            const method   = DOWNSCALING_METHODS[dsKey];
-            if (!method) return;
+            const d        = DOWNSCALING[dsKey];
+            if (!d) return;
 
-            if (method.key === "nex-gddp-cmip6") {
+            if (d.dataKey === "nex-gddp-cmip6") {
                 path = `../data/output_nex_${gcm}_${scenario}`;
-            } else if (method.key === "glarm") {
+            } else if (d.dataKey === "glarm") {
                 path = `../data/output_glarm_${scenario}`;
-            } else if (method.key === "climrr") {
+            } else if (d.dataKey === "climrr") {
                 path = `../data/output_climrr_${scenario}`;
             }
         }
@@ -267,6 +318,23 @@ const App = {
         DataLoader.setBasePath(path);
         UIControls._updateProvenance();
         this.loadPoints();
+    },
+
+    // ------------------------------------------------------------------
+    // Helper getters used by UIControls for provenance
+    // ------------------------------------------------------------------
+
+    getSourceInfo() {
+        if (this._mode === "historical") {
+            return { mode: "historical", dataset: "aorc" };
+        }
+        return {
+            mode:         "future",
+            gcm:          document.getElementById("gcm-select").value,
+            downscaling:  document.getElementById("downscaling-select").value,
+            scenario:     document.getElementById("scenario-select").value,
+            period:       document.getElementById("period-select").value,
+        };
     },
 
     // ------------------------------------------------------------------

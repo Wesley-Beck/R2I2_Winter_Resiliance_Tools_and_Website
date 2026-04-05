@@ -536,23 +536,41 @@ select.full-width {
     color: #e0d0c0;
 }
 
-/* Data type badges */
+/* Data characteristic badges */
+
+.source-card-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 4px;
+}
 
 .source-badge {
     display: inline-block;
-    font-size: 0.65rem;
+    font-size: 0.6rem;
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.5px;
-    padding: 2px 8px;
+    letter-spacing: 0.4px;
+    padding: 2px 6px;
     border-radius: 3px;
-    margin-bottom: 2px;
 }
 
 .badge-observed {
     background: #1a4a2a;
     color: #80d090;
     border: 1px solid #2a6a3a;
+}
+
+.badge-reanalysis {
+    background: #2a3a2a;
+    color: #90c090;
+    border: 1px solid #3a5a3a;
+}
+
+.badge-modeled {
+    background: #3a2a1a;
+    color: #d0b080;
+    border: 1px solid #5a3a2a;
 }
 
 .badge-statistical {
@@ -565,6 +583,30 @@ select.full-width {
     background: #4a2a1a;
     color: #d0a080;
     border: 1px solid #6a3a2a;
+}
+
+.badge-hourly {
+    background: #2a2a3a;
+    color: #a0a0d0;
+    border: 1px solid #3a3a5a;
+}
+
+.badge-daily {
+    background: #2a2a3a;
+    color: #a0a0c0;
+    border: 1px solid #3a3a4a;
+}
+
+.badge-highres {
+    background: #1a3a3a;
+    color: #80c0c0;
+    border: 1px solid #2a4a4a;
+}
+
+.badge-coarse {
+    background: #3a3a2a;
+    color: #c0c080;
+    border: 1px solid #4a4a3a;
 }
 
 /* Model chain display */
