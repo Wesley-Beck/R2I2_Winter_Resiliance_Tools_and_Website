@@ -1,6 +1,11 @@
 /**
  * UI controls — wires up layer selectors, time navigation, and legend.
  * Supports full AORC timeline (1979-2024) with year/month/day/hour controls.
+ *
+ * Optimized:
+ * - Debounced loading prevents rapid-fire CSV requests
+ * - Uses array-indexed data (Float32Array) instead of object lookups
+ * - Error recovery resets state cleanly on load failure
  */
 
 const UIControls = {
@@ -10,9 +15,9 @@ const UIControls = {
     currentDay: 15,
     currentHour: 12,
 
-    /**
-     * Initialize all UI event listeners.
-     */
+    _loadDebounceTimer: null,
+    _isLoading: false,
+
     init() {
         // Populate year dropdown (1979-2024)
         const yearSelect = document.getElementById("year-select");
@@ -24,7 +29,6 @@ const UIControls = {
             yearSelect.appendChild(opt);
         }
 
-        // Populate day dropdown (1-31, adjusted per month)
         this._populateDays();
 
         // Layer selectors — only one group can be active at a time
@@ -33,14 +37,9 @@ const UIControls = {
             select.addEventListener("change", (e) => {
                 const value = e.target.value;
                 if (!value) return;
-
-                // Clear other selects
-                selects.forEach(s => {
-                    if (s !== e.target) s.value = "";
-                });
-
+                selects.forEach(s => { if (s !== e.target) s.value = ""; });
                 this.currentLayerPath = value;
-                this._loadAndDisplay();
+                this._debouncedLoad();
             });
         });
 
@@ -48,24 +47,24 @@ const UIControls = {
         yearSelect.addEventListener("change", (e) => {
             this.currentYear = parseInt(e.target.value);
             this._populateDays();
-            this._loadAndDisplay();
+            this._debouncedLoad();
         });
 
         // Month selector
         document.getElementById("month-select").addEventListener("change", (e) => {
             this.currentMonth = parseInt(e.target.value);
             this._populateDays();
-            this._loadAndDisplay();
+            this._debouncedLoad();
         });
 
-        // Day selector
+        // Day selector — no CSV reload needed, just re-display
         document.getElementById("day-select").addEventListener("change", (e) => {
             this.currentDay = parseInt(e.target.value);
             this._updateTimeDisplay();
             this._displayCurrentTimestamp();
         });
 
-        // Hour slider
+        // Hour slider — no CSV reload needed, just re-display
         document.getElementById("hour-slider").addEventListener("input", (e) => {
             this.currentHour = parseInt(e.target.value);
             document.getElementById("hour-display").textContent =
@@ -90,21 +89,13 @@ const UIControls = {
             }
         });
 
-        // Set initial time display
         this._updateTimeDisplay();
-
-        // Set initial provenance note
         this._updateProvenance();
     },
 
-    /**
-     * Populate the day dropdown based on current year/month.
-     */
     _populateDays() {
         const daySelect = document.getElementById("day-select");
         const daysInMonth = new Date(this.currentYear, this.currentMonth, 0).getDate();
-
-        // Preserve current day if valid
         const prevDay = this.currentDay;
         daySelect.innerHTML = "";
 
@@ -120,9 +111,6 @@ const UIControls = {
         this._updateTimeDisplay();
     },
 
-    /**
-     * Get the current timestamp string.
-     */
     getCurrentTimestamp() {
         const y = this.currentYear;
         const m = String(this.currentMonth).padStart(2, "0");
@@ -131,20 +119,28 @@ const UIControls = {
         return `${y}-${m}-${d} ${h}:00`;
     },
 
-    /**
-     * Update the time display text.
-     */
     _updateTimeDisplay() {
-        const ts = this.getCurrentTimestamp();
-        document.getElementById("full-time-display").textContent = ts;
+        document.getElementById("full-time-display").textContent = this.getCurrentTimestamp();
     },
 
     /**
-     * Load CSV data for current layer/time, then display.
+     * Debounce CSV loading — waits 150ms after last change before loading.
+     * Prevents rapid dropdown changes from triggering multiple CSV downloads.
      */
+    _debouncedLoad() {
+        if (this._loadDebounceTimer) {
+            clearTimeout(this._loadDebounceTimer);
+        }
+        this._loadDebounceTimer = setTimeout(() => {
+            this._loadAndDisplay();
+        }, 150);
+    },
+
     async _loadAndDisplay() {
         if (!this.currentLayerPath) return;
+        if (this._isLoading) return; // Prevent concurrent loads
 
+        this._isLoading = true;
         const status = document.getElementById("status-text");
         status.textContent = "Loading data...";
         MapLayer.showLoading("Loading CSV data...");
@@ -160,43 +156,51 @@ const UIControls = {
             this._updateProvenance();
             status.textContent = "Ready";
         } catch (err) {
+            if (err.message === "Request superseded") {
+                // A newer request replaced this one — don't show error
+                this._isLoading = false;
+                return;
+            }
             console.warn("Load error:", err.message);
             status.textContent = `No data for ${this.currentYear}-${String(this.currentMonth).padStart(2, "0")}`;
+            MapLayer.currentData = null;
+            MapLayer.currentHourIndex = -1;
             MapLayer.resetColors();
         }
 
         MapLayer.hideLoading();
+        this._isLoading = false;
 
-        // Reload wildfire perimeters if toggled on and year changed
+        // Reload wildfire perimeters if toggled on
         if (document.getElementById("wildfire-toggle").checked) {
             WildfireOverlay.load(this.currentYear);
         }
     },
 
     /**
-     * Display data for the current timestamp (no CSV reload).
+     * Display data for the current timestamp using array-indexed access.
+     * No object allocation — reads directly from Float32Array.
      */
     _displayCurrentTimestamp() {
         if (!MapLayer.currentData || !this.currentLayerPath) return;
 
         const targetTs = this.getCurrentTimestamp();
-        const ts = DataLoader.findClosestTimestamp(
+        const hourIdx = DataLoader.findClosestTimestampIndex(
             MapLayer.currentData.timestamps, targetTs
         );
 
-        if (!ts) {
+        if (hourIdx < 0) {
             MapLayer.resetColors();
             return;
         }
 
-        MapLayer.currentTimestamp = ts;
-        const values = DataLoader.getValuesAtTime(MapLayer.currentData, ts);
-        MapLayer.updateColors(this.currentLayerPath, values);
+        MapLayer.currentHourIndex = hourIdx;
+        const values = DataLoader.getValuesAtHourIndex(MapLayer.currentData, hourIdx);
+        if (values) {
+            MapLayer.updateColors(this.currentLayerPath, values);
+        }
     },
 
-    /**
-     * Update the color legend for the current variable.
-     */
     _updateLegend() {
         const config = VariableConfig[this.currentLayerPath];
         if (!config) return;
@@ -209,9 +213,6 @@ const UIControls = {
             `${config.label}${config.units ? " (" + config.units + ")" : ""}`;
     },
 
-    /**
-     * Update AORC data provenance note based on selected year.
-     */
     _updateProvenance() {
         const y = this.currentYear;
         let note = "";
