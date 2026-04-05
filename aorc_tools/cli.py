@@ -507,5 +507,261 @@ def project_extract(points_file, mirror_dir, source, gcm, scenario, output,
     click.echo(f"Output: {output}")
 
 
+@main.command()
+@click.option("--data-dir", default="./data/output", help="Base output directory with SQLite data")
+@click.option("--figures-dir", default="./data/figures", help="Directory to save generated figures")
+@click.option("--fdis", default=None, help="Comma-separated FDI names (default: auto-detect)")
+@click.option("--months", default=None,
+              help="Comma-separated YYYY-MM ranges (default: all available)")
+def analyze(data_dir, figures_dir, fdis, months):
+    """Generate publication figures from extracted FDI data.
+
+    Produces hotspot maps, seasonality profiles, exceedance frequency maps,
+    FDI similarity matrices, ROC curves, and lowest-risk area maps.
+
+    Example:
+        aorc-tools analyze --data-dir ./data/output --figures-dir ./data/figures
+        aorc-tools analyze --fdis FWI,ERC,BI,FPI --figures-dir ./figures
+    """
+    from aorc_tools.analysis.data_access import AnalysisDataStore
+    from aorc_tools.analysis.figures import generate_all_figures
+
+    store = AnalysisDataStore(data_dir)
+    available = store.available_months()
+    click.echo(f"Data directory: {data_dir}")
+    click.echo(f"Available months: {len(available)}")
+
+    if not available:
+        click.echo("No data found. Run 'aorc-tools extract' first.", err=True)
+        sys.exit(1)
+
+    for y, m in available:
+        click.echo(f"  {y}-{m:02d}")
+
+    # Parse months filter
+    month_list = None
+    if months:
+        month_list = []
+        for part in months.split(","):
+            part = part.strip()
+            y, m = part.split("-")
+            month_list.append((int(y), int(m)))
+    else:
+        month_list = available
+
+    # Parse FDI filter
+    fdi_list = None
+    if fdis:
+        fdi_list = [f.strip() for f in fdis.split(",")]
+
+    click.echo(f"\nGenerating figures in {figures_dir}...")
+    generated = generate_all_figures(store, figures_dir, fdis=fdi_list, months=month_list)
+
+    click.echo(f"\nGenerated {len(generated)} figures:")
+    for path in generated:
+        click.echo(f"  {path}")
+
+
+@main.command(name="analyze-correlation")
+@click.option("--data-dir", default="./data/output", help="Base output directory")
+@click.option("--figures-dir", default="./data/figures", help="Figure output directory")
+@click.option("--year-start", default=2000, type=int, help="Start year for NIFC data")
+@click.option("--year-end", default=2024, type=int, help="End year for NIFC data")
+@click.option("--fdis", default=None, help="Comma-separated FDI names")
+def analyze_correlation(data_dir, figures_dir, year_start, year_end, fdis):
+    """Correlate FDI values with actual NIFC wildfire occurrences.
+
+    Fetches fire perimeters from the NIFC Interagency Fire Perimeter History
+    for the WUP region and computes point-biserial correlations, ROC curves,
+    and hit rate analyses for each FDI.
+
+    Example:
+        aorc-tools analyze-correlation --year-start 2015 --year-end 2023
+    """
+    from pathlib import Path
+    from aorc_tools.analysis.data_access import AnalysisDataStore
+    from aorc_tools.analysis.correlation import (
+        fetch_nifc_fires, build_fire_calendar, compare_fdis, roc_analysis,
+    )
+    from aorc_tools.analysis.figures import plot_roc_curves
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    store = AnalysisDataStore(data_dir)
+    available = store.available_months()
+
+    if not available:
+        click.echo("No data found.", err=True)
+        sys.exit(1)
+
+    # Fetch NIFC fires
+    click.echo(f"Fetching NIFC wildfire data ({year_start}-{year_end})...")
+    fires = fetch_nifc_fires(year_start, year_end)
+    click.echo(f"Found {len(fires)} fires in WUP region")
+
+    fire_dates, fires_by_date = build_fire_calendar(fires, year_start, year_end)
+    click.echo(f"Fire days: {len(fire_dates)}")
+
+    # Load FDI data
+    fdi_list = None
+    if fdis:
+        fdi_list = [f.strip() for f in fdis.split(",")]
+    else:
+        y, m = available[0]
+        all_vars = store.get_variables(y, m)
+        fdi_list = [v for v in all_vars if v in
+                    {"FWI", "ISI", "BUI", "ERC", "BI", "SC", "FPI"}]
+
+    click.echo(f"Analyzing FDIs: {', '.join(fdi_list)}")
+
+    # Load data and build fire binary
+    import numpy as np
+    fdi_data = {}
+    dates_all = None
+    for fdi in fdi_list:
+        try:
+            dates, data = store.load_multi_month(available, fdi, "daily_max")
+            fdi_data[fdi] = data
+            if dates_all is None:
+                dates_all = dates
+        except Exception as e:
+            click.echo(f"  Skipping {fdi}: {e}")
+
+    if not fdi_data or dates_all is None:
+        click.echo("No FDI data loaded.", err=True)
+        sys.exit(1)
+
+    fire_binary = np.array([1 if d in fire_dates else 0 for d in dates_all])
+    click.echo(f"Date range: {dates_all[0]} to {dates_all[-1]}")
+    click.echo(f"Fire days in range: {fire_binary.sum()}")
+
+    # Compare FDIs
+    comparison, ranking = compare_fdis(fdi_data, fire_binary, dates_all, fire_dates)
+
+    click.echo("\n=== FDI-Wildfire Correlation Ranking ===")
+    click.echo(f"{'Rank':>4} {'FDI':>6} {'AUC':>8} {'Corr':>8} {'Opt.Thresh':>12}")
+    for i, (name, metrics) in enumerate(ranking):
+        click.echo(f"{i+1:4d} {name:>6} {metrics['auc']:8.3f} "
+                   f"{metrics['correlation']:8.3f} {metrics['optimal_threshold']:12.1f}")
+
+    # Generate ROC curves
+    figures_path = Path(figures_dir)
+    figures_path.mkdir(parents=True, exist_ok=True)
+
+    roc_results = {}
+    for name, data in fdi_data.items():
+        spatial_mean = np.nanmean(data, axis=1)
+        roc_results[name] = roc_analysis(spatial_mean, fire_binary)
+
+    path = figures_path / "roc_curves_wildfire.png"
+    fig, _ = plot_roc_curves(roc_results, save_path=str(path))
+    plt.close(fig)
+    click.echo(f"\nSaved ROC curves: {path}")
+
+
+@main.command(name="analyze-monte-carlo")
+@click.option("--data-dir", default="./data/output", help="Base output directory")
+@click.option("--figures-dir", default="./data/figures", help="Figure output directory")
+@click.option("--n-samples", default=500, type=int, help="Monte Carlo iterations")
+@click.option("--fdis", default=None, help="Comma-separated FDI names")
+def analyze_monte_carlo(data_dir, figures_dir, n_samples, fdis):
+    """Run Monte Carlo FDI cross-comparison analysis.
+
+    Repeatedly samples time periods and measures hotspot overlap between
+    FDI systems. Reveals which indices agree on high-risk locations.
+
+    Example:
+        aorc-tools analyze-monte-carlo --n-samples 1000 --fdis FWI,ERC,BI,FPI
+    """
+    from pathlib import Path
+    from aorc_tools.analysis.data_access import AnalysisDataStore
+    from aorc_tools.analysis.monte_carlo import (
+        monte_carlo_fdi_comparison, fdi_similarity_matrix, cluster_fdis,
+    )
+    from aorc_tools.analysis.figures import plot_similarity_matrix
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    store = AnalysisDataStore(data_dir)
+    available = store.available_months()
+
+    if not available:
+        click.echo("No data found.", err=True)
+        sys.exit(1)
+
+    fdi_list = None
+    if fdis:
+        fdi_list = [f.strip() for f in fdis.split(",")]
+    else:
+        y, m = available[0]
+        all_vars = store.get_variables(y, m)
+        fdi_list = [v for v in all_vars if v in
+                    {"FWI", "ISI", "BUI", "FFMC", "DMC", "DC",
+                     "ERC", "BI", "SC", "FPI"}]
+
+    click.echo(f"FDIs: {', '.join(fdi_list)}")
+    click.echo(f"Monte Carlo samples: {n_samples}")
+
+    # Load data
+    fdi_data = {}
+    for fdi in fdi_list:
+        try:
+            _, data = store.load_multi_month(available, fdi, "daily_max")
+            fdi_data[fdi] = data
+        except Exception as e:
+            click.echo(f"  Skipping {fdi}: {e}")
+
+    if len(fdi_data) < 2:
+        click.echo("Need at least 2 FDIs for comparison.", err=True)
+        sys.exit(1)
+
+    # Run Monte Carlo
+    click.echo("Running Monte Carlo comparison...")
+    mc_result = monte_carlo_fdi_comparison(fdi_data, n_samples=n_samples)
+
+    click.echo("\n=== Monte Carlo Hotspot Overlap (Jaccard Similarity) ===")
+    names = mc_result["names"]
+    mean_sim = mc_result["mean_similarity"]
+    click.echo(f"{'':>6}", nl=False)
+    for n in names:
+        click.echo(f"{n:>8}", nl=False)
+    click.echo()
+    for i, name in enumerate(names):
+        click.echo(f"{name:>6}", nl=False)
+        for j in range(len(names)):
+            click.echo(f"{mean_sim[i,j]:8.3f}", nl=False)
+        click.echo()
+
+    # Rank correlation matrix
+    fdi_means = {name: np.nanmean(data, axis=0) for name, data in fdi_data.items()}
+    corr_names, corr_matrix, _ = fdi_similarity_matrix(fdi_means)
+
+    # Clustering
+    clusters, merges = cluster_fdis(corr_matrix, corr_names, n_clusters=3)
+    click.echo("\n=== FDI Clusters ===")
+    for cid, members in clusters.items():
+        click.echo(f"  Cluster {cid}: {', '.join(members)}")
+
+    # Save figures
+    figures_path = Path(figures_dir)
+    figures_path.mkdir(parents=True, exist_ok=True)
+
+    path = figures_path / "fdi_similarity_rank_correlation.png"
+    fig, _ = plot_similarity_matrix(corr_names, corr_matrix,
+                                     title="FDI Rank Correlation", save_path=str(path))
+    plt.close(fig)
+    click.echo(f"\nSaved: {path}")
+
+    path = figures_path / "fdi_monte_carlo_overlap.png"
+    fig, _ = plot_similarity_matrix(names, mean_sim,
+                                     title=f"Monte Carlo Hotspot Overlap (n={n_samples})",
+                                     save_path=str(path))
+    plt.close(fig)
+    click.echo(f"Saved: {path}")
+
+
 if __name__ == "__main__":
     main()
