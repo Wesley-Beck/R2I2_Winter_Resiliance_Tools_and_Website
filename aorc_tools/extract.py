@@ -78,7 +78,7 @@ class CSVAccumulator:
             df.index.name = "point_id"
 
             filename = f"{prefix}{name}.csv"
-            df.to_csv(output_dir / filename, float_format="%.4g")
+            df.to_csv(output_dir / filename)
 
         logger.info("Saved %d CSV files to %s", len(self.data), output_dir)
 
