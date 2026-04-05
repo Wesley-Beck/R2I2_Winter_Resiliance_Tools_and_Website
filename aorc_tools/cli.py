@@ -308,5 +308,55 @@ def status():
         sys.exit(1)
 
 
+@main.command(name="glarm-info")
+@click.option("--data-path", default=None, help="Path to GLARM NetCDF files")
+@click.option("--scenario", default="rcp85", type=click.Choice(["rcp45", "rcp85"]),
+              help="Emission scenario")
+def glarm_info(data_path, scenario):
+    """Show GLARM climate model adapter status and available variables.
+
+    Reports which fire weather variables GLARM provides and which
+    are missing. Missing variables will produce NaN fire indices.
+    """
+    from aorc_tools.climate_model_adapter import GLARMAdapter, REQUIRED_VARIABLES
+
+    if data_path:
+        adapter = GLARMAdapter(data_path, scenario=scenario)
+    else:
+        click.echo("GLARM Climate Model Adapter")
+        click.echo("=" * 40)
+        click.echo(f"Dataset: GLARM-Proj1 (Xue et al. 2022)")
+        click.echo(f"Source:  https://digitalcommons.mtu.edu/glts/")
+        click.echo(f"Period:  1981-2099 (RCP 4.5 & RCP 8.5)")
+        click.echo(f"Grid:    18 km (atmospheric), 1-4 km (lake)")
+        click.echo()
+        click.echo("Expected variables:")
+        adapter = GLARMAdapter("/tmp/placeholder", scenario=scenario)
+
+    info = adapter.info()
+    click.echo(f"\nData source: {info['name']}")
+    click.echo(f"Time range:  {info['start_year']}-{info['end_year']}")
+    click.echo(f"\nAvailable variables ({len(info['available_variables'])}):")
+    for var in info["available_variables"]:
+        req = "REQUIRED" if var in REQUIRED_VARIABLES else "optional"
+        click.echo(f"  {var:30s} [{req}]")
+
+    if info["missing_variables"]:
+        click.echo(f"\nMissing required variables ({len(info['missing_variables'])}):")
+        for var in info["missing_variables"]:
+            click.echo(f"  {var:30s} [MISSING - will produce NaN]")
+    else:
+        click.echo("\nAll required variables available.")
+
+    click.echo(f"\nReady for extraction: {'YES' if info['ready'] else 'NO (missing variables)'}")
+
+    if not data_path:
+        click.echo("\nUsage:")
+        click.echo("  1. Download GLARM data from https://digitalcommons.mtu.edu/glts/")
+        click.echo("  2. Place NetCDF files in a local directory")
+        click.echo("  3. Run: aorc-tools glarm-info --data-path /path/to/glarm --scenario rcp85")
+        click.echo("  4. Extract: aorc-tools extract --data-source glarm --year 2050 ...")
+
+
 if __name__ == "__main__":
     main()

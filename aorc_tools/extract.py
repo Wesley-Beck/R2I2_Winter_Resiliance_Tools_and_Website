@@ -30,7 +30,8 @@ from aorc_tools.climate_convert import (
     specific_to_relative_humidity,
 )
 from aorc_tools.fire_indices.fwi import HourlyFWI
-from aorc_tools.fire_indices.nfdrs import compute_erc_bi
+from aorc_tools.fire_indices.nfdrs import compute_erc_bi, get_fuel_params
+from aorc_tools.fire_indices.fpi import compute_fpi
 from aorc_tools.fire_indices.fuel_moisture import emc_fuel_moisture, NelsonFuelMoisture
 from aorc_tools.metadata import generate_metadata, save_metadata
 from aorc_tools.storage import SQLiteStorage
@@ -164,10 +165,17 @@ def extract_month(year, month, points_df, output_base, loader=None,
     conv_acc = CSVAccumulator(n_points, point_ids) if use_csv else None
     cfwi_acc = CSVAccumulator(n_points, point_ids) if use_csv else None
     nfdrs_acc = CSVAccumulator(n_points, point_ids) if use_csv else None
+    fpi_acc = CSVAccumulator(n_points, point_ids) if use_csv else None
 
     # Initialize fire index models
     fwi = HourlyFWI(n_points, latitude=latitude, initial_state=fwi_state)
     fm_model = NelsonFuelMoisture(n_points, initial_fm=fm_state) if fuel_moisture_method == "nelson" else None
+
+    # FPI fuel parameters from NFDRS fuel model
+    _fp = get_fuel_params(fuel_model)
+    fpi_llfm = _fp.get("wherb", 0.0) + _fp.get("wwood", 0.0)  # live fuel loading
+    fpi_dlfm = _fp.get("w1", 0.0) + _fp.get("w10", 0.0) + _fp.get("w100", 0.0)  # dead fuel loading
+    fpi_mxd = _fp.get("mxd", 25.0)  # moisture of extinction (%)
 
     import calendar
     n_days = calendar.monthrange(year, month)[1]
@@ -239,6 +247,10 @@ def extract_month(year, month, points_df, output_base, loader=None,
         if day not in all_day_data:
             hours_processed += 24
             continue
+
+        # Daily accumulators for FPI (needs Tmax and RH_min per day)
+        daily_tmax_f = np.full(n_points, -999.0)
+        daily_rh_min = np.full(n_points, 999.0)
 
         daily_data = all_day_data[day]
 
@@ -326,6 +338,35 @@ def extract_month(year, month, points_df, output_base, loader=None,
                 for key, values in all_nfdrs.items():
                     nfdrs_acc.add(key, current, values)
 
+            # Track daily extremes for FPI
+            daily_tmax_f = np.maximum(daily_tmax_f, temp_f)
+            daily_rh_min = np.minimum(daily_rh_min, rh)
+
+            # FPI: compute once at end of day (hour 23) using daily Tmax/RH_min
+            if current.hour == 23:
+                # Seasonal Relative Greenness proxy (latitude + DOY curve)
+                # Peak greenness ~DOY 190 (July), minimum ~DOY 15 (January)
+                rg_proxy = np.full(n_points, 0.3 + 0.5 * max(0.0,
+                    np.cos((doy - 190) * 2 * np.pi / 365)))
+
+                fpi_result = compute_fpi(
+                    nd0=rg_proxy * 0.8,  # Scale RG to NDVI range
+                    nd_min=np.full(n_points, 0.1),
+                    nd_max=np.full(n_points, 0.9),
+                    llfm=np.full(n_points, fpi_llfm),
+                    dlfm=np.full(n_points, fpi_dlfm),
+                    mxd=np.full(n_points, fpi_mxd),
+                    tmax_f=daily_tmax_f,
+                    rh_min=daily_rh_min,
+                )
+
+                if db:
+                    for key, values in fpi_result.items():
+                        db.add(key, current, values)
+                if fpi_acc:
+                    for key, values in fpi_result.items():
+                        fpi_acc.add(key, current, values)
+
             hours_processed += 1
 
     # Flush SQLite and generate web files
@@ -345,6 +386,8 @@ def extract_month(year, month, points_df, output_base, loader=None,
             cfwi_acc.save(month_dir / "cfwi", prefix)
         if nfdrs_acc:
             nfdrs_acc.save(month_dir / "nfdrs", prefix)
+        if fpi_acc:
+            fpi_acc.save(month_dir / "fpi", prefix)
 
     # Save carry-forward state
     state_dir = month_dir / "state"
@@ -367,6 +410,7 @@ def extract_month(year, month, points_df, output_base, loader=None,
             "latitude": latitude,
             "n_points": n_points,
             "output_format": output_format,
+            "fpi_ndvi_source": "seasonal_proxy",
         },
     )
     save_metadata(metadata, month_dir / f"metadata_{year}_{month:02d}.json")

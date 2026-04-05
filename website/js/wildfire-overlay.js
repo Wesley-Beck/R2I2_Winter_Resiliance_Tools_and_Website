@@ -1,12 +1,18 @@
 /**
  * Wildfire perimeter overlay — loads historical fire perimeters from NIFC
  * ArcGIS REST API and displays them as GeoJSON polygons on the Leaflet map.
+ *
+ * Enhanced with:
+ * - Clickable fire list panel sorted by acreage
+ * - Click-to-zoom on individual fires
+ * - Calendar integration (fire discovery day markers)
  */
 
 const WildfireOverlay = {
     layer: null,
     currentYear: null,
     cache: {},  // year → GeoJSON data
+    _highlightedLayer: null,
 
     // WUP bounding box for spatial query
     BBOX: {
@@ -41,6 +47,8 @@ const WildfireOverlay = {
 
             if (!geojson || !geojson.features || geojson.features.length === 0) {
                 infoEl.textContent = `No recorded fires in WUP for ${year}`;
+                this._clearFireList();
+                UIControls.setFireDates(new Set());
                 return;
             }
 
@@ -52,35 +60,20 @@ const WildfireOverlay = {
                     fillOpacity: 0.25,
                 },
                 onEachFeature: (feature, layer) => {
-                    const p = feature.properties;
-                    const name = p.poly_IncidentName || p.irwin_IncidentName || p.IncidentName || "Unknown";
-                    const acres = p.poly_GISAcres || p.GISAcres || p.irwin_CalculatedAcres || "N/A";
-                    const cause = p.irwin_FireCause || p.FireCause || "";
-                    const date = p.irwin_FireDiscoveryDateTime || p.FireDiscoveryDateTime || "";
-
-                    let dateStr = "";
-                    if (date) {
-                        const d = new Date(date);
-                        if (!isNaN(d)) dateStr = d.toLocaleDateString();
-                    }
-
-                    const acresStr = typeof acres === "number" ? acres.toFixed(0) : acres;
-
-                    layer.bindPopup(
-                        `<div style="font-size: 0.85rem;">` +
-                        `<strong>${name}</strong><br>` +
-                        `${acresStr} acres<br>` +
-                        (dateStr ? `Discovered: ${dateStr}<br>` : "") +
-                        (cause ? `Cause: ${cause}` : "") +
-                        `</div>`
-                    );
+                    layer.bindPopup(this._buildPopup(feature.properties));
                 },
             });
 
             this.layer.addTo(MapLayer.map);
 
             const count = geojson.features.length;
-            infoEl.textContent = `${count} fire${count !== 1 ? "s" : ""} in WUP for ${year}`;
+            const totalAcres = this._totalAcres(geojson.features);
+            infoEl.textContent = `${count} fire${count !== 1 ? "s" : ""} in WUP for ${year}` +
+                (totalAcres > 0 ? ` (${totalAcres.toLocaleString()} acres)` : "");
+
+            // Build fire list and calendar markers
+            this._buildFireList(geojson.features);
+            this._updateFireCalendar(geojson.features);
 
         } catch (err) {
             console.error("Wildfire load error:", err);
@@ -96,6 +89,136 @@ const WildfireOverlay = {
             this.layer.remove();
             this.layer = null;
         }
+        this._clearHighlight();
+        this._clearFireList();
+        UIControls.setFireDates(new Set());
+    },
+
+    /**
+     * Build the fire list panel with clickable entries sorted by acreage.
+     */
+    _buildFireList(features) {
+        const listEl = document.getElementById("fire-list");
+        if (!listEl) return;
+        listEl.innerHTML = "";
+
+        // Sort by acreage (largest first)
+        const sorted = [...features].sort((a, b) => {
+            return this._getAcres(b.properties) - this._getAcres(a.properties);
+        });
+
+        for (const feature of sorted) {
+            const p = feature.properties;
+            const name = p.poly_IncidentName || p.irwin_IncidentName || p.IncidentName || "Unknown";
+            const acres = this._getAcres(p);
+            const dateStr = this._getDateStr(p);
+
+            const item = document.createElement("div");
+            item.className = "fire-list-item";
+            item.innerHTML = `
+                <span class="fire-name">${name}</span>
+                <span class="fire-detail">${acres > 0 ? acres.toLocaleString() + " ac" : ""}${dateStr ? " &middot; " + dateStr : ""}</span>
+            `;
+            item.addEventListener("click", () => this._zoomToFire(feature));
+            listEl.appendChild(item);
+        }
+    },
+
+    /**
+     * Zoom to a specific fire and highlight it.
+     */
+    _zoomToFire(feature) {
+        this._clearHighlight();
+
+        // Create a temporary highlight layer
+        this._highlightedLayer = L.geoJSON(feature, {
+            style: {
+                color: "#ffff00",
+                weight: 4,
+                fillColor: "#ffcc00",
+                fillOpacity: 0.4,
+            },
+        });
+        this._highlightedLayer.addTo(MapLayer.map);
+
+        // Zoom to bounds
+        const bounds = this._highlightedLayer.getBounds();
+        if (bounds.isValid()) {
+            MapLayer.map.fitBounds(bounds, { padding: [40, 40], maxZoom: 12 });
+        }
+
+        // Open popup
+        this._highlightedLayer.eachLayer(layer => {
+            layer.bindPopup(this._buildPopup(feature.properties)).openPopup();
+        });
+
+        // Auto-clear highlight after 8 seconds
+        setTimeout(() => this._clearHighlight(), 8000);
+    },
+
+    _clearHighlight() {
+        if (this._highlightedLayer) {
+            this._highlightedLayer.remove();
+            this._highlightedLayer = null;
+        }
+    },
+
+    /**
+     * Update calendar with fire discovery date markers.
+     */
+    _updateFireCalendar(features) {
+        const fireDays = new Set();
+        const currentMonth = UIControls.currentMonth;
+
+        for (const feature of features) {
+            const date = this._getFireDate(feature.properties);
+            if (date && date.getMonth() + 1 === currentMonth) {
+                fireDays.add(date.getDate());
+            }
+        }
+
+        UIControls.setFireDates(fireDays);
+    },
+
+    _clearFireList() {
+        const listEl = document.getElementById("fire-list");
+        if (listEl) listEl.innerHTML = "";
+    },
+
+    _buildPopup(p) {
+        const name = p.poly_IncidentName || p.irwin_IncidentName || p.IncidentName || "Unknown";
+        const acres = this._getAcres(p);
+        const cause = p.irwin_FireCause || p.FireCause || "";
+        const dateStr = this._getDateStr(p);
+        const acresStr = acres > 0 ? `${acres.toLocaleString()} acres` : "Size unknown";
+
+        return `<div style="font-size: 0.85rem;">` +
+            `<strong>${name}</strong><br>` +
+            `${acresStr}<br>` +
+            (dateStr ? `Discovered: ${dateStr}<br>` : "") +
+            (cause ? `Cause: ${cause}` : "") +
+            `</div>`;
+    },
+
+    _getAcres(p) {
+        const raw = p.poly_GISAcres || p.GISAcres || p.irwin_CalculatedAcres || 0;
+        return typeof raw === "number" ? Math.round(raw) : 0;
+    },
+
+    _totalAcres(features) {
+        return features.reduce((sum, f) => sum + this._getAcres(f.properties), 0);
+    },
+
+    _getFireDate(p) {
+        const raw = p.irwin_FireDiscoveryDateTime || p.FireDiscoveryDateTime || "";
+        if (!raw) return null;
+        const d = new Date(raw);
+        return isNaN(d) ? null : d;
+    },
+
+    _getDateStr(p) {
+        const d = this._getFireDate(p);
+        return d ? d.toLocaleDateString() : "";
     },
 
     /**

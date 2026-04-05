@@ -13,6 +13,15 @@ const App = {
         // Initialize UI controls
         UIControls.init();
 
+        // Data source selector
+        const sourceSelect = document.getElementById("data-source-select");
+        if (sourceSelect) {
+            sourceSelect.addEventListener("change", (e) => {
+                DataLoader.setBasePath(e.target.value);
+                this.loadPoints();
+            });
+        }
+
         // Try to load point index
         await this.loadPoints();
     },

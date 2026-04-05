@@ -412,6 +412,56 @@ input[type="checkbox"] {
     align-items: center;
 }
 
+/* --- Fire List --- */
+
+.fire-list-item {
+    padding: 5px 8px;
+    border-bottom: 1px solid #5c3a20;
+    cursor: pointer;
+    transition: background 0.15s;
+    font-size: 0.75rem;
+}
+
+.fire-list-item:hover {
+    background: #5c3a20;
+}
+
+.fire-list-item .fire-name {
+    display: block;
+    color: #f0c27a;
+    font-weight: 600;
+}
+
+.fire-list-item .fire-detail {
+    display: block;
+    color: #a08060;
+    font-size: 0.65rem;
+}
+
+/* --- Fire Day Calendar Marker --- */
+
+.cal-day.fire-day {
+    position: relative;
+}
+
+.cal-day.fire-day::after {
+    content: "";
+    position: absolute;
+    bottom: 1px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #ff4444;
+}
+
+/* --- Full-Width Selects --- */
+
+select.full-width {
+    width: 100%;
+}
+
 /* --- Responsive --- */
 
 @media (max-width: 768px) {

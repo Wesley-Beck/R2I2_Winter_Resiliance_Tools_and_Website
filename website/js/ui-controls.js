@@ -25,6 +25,18 @@ const UIControls = {
 
     _loadDebounceTimer: null,
     _isLoading: false,
+    _continuousPlay: false,
+    _fireDates: new Set(),  // days in current month with fire discoveries
+
+    /**
+     * Format an hour (0-23) as AM/PM string.
+     */
+    _formatHourAmPm(hour) {
+        if (hour === 0) return "12:00 AM";
+        if (hour < 12) return `${hour}:00 AM`;
+        if (hour === 12) return "12:00 PM";
+        return `${hour - 12}:00 PM`;
+    },
 
     init() {
         // Populate year dropdown
@@ -70,7 +82,7 @@ const UIControls = {
         document.getElementById("hour-slider").addEventListener("input", (e) => {
             this.currentHour = parseInt(e.target.value);
             document.getElementById("hour-display").textContent =
-                `${String(this.currentHour).padStart(2, "0")}:00`;
+                this._formatHourAmPm(this.currentHour);
             this._updateTimeDisplay();
             this._displayCurrentTimestamp();
             this._syncPlaybackSlider();
@@ -90,12 +102,13 @@ const UIControls = {
         // Speed selector
         // (speed is read dynamically during playback)
 
-        // Load data button
-        document.getElementById("load-data-btn").addEventListener("click", () => {
-            const path = document.getElementById("data-path").value;
-            DataLoader.setBasePath(path);
-            App.loadPoints();
-        });
+        // Continuous playback toggle
+        const contToggle = document.getElementById("continuous-toggle");
+        if (contToggle) {
+            contToggle.addEventListener("change", (e) => {
+                this._continuousPlay = e.target.checked;
+            });
+        }
 
         // Wildfire overlay toggle
         document.getElementById("wildfire-toggle").addEventListener("change", (e) => {
@@ -145,6 +158,7 @@ const UIControls = {
             if (d === this.rangeEnd) cell.classList.add("selected-end");
             if (d > this.rangeStart && d < this.rangeEnd) cell.classList.add("in-range");
             if (d === this.currentDay) cell.classList.add("current");
+            if (this._fireDates.has(d)) cell.classList.add("fire-day");
 
             cell.addEventListener("click", () => this._onDayClick(d));
             container.appendChild(cell);
@@ -242,7 +256,12 @@ const UIControls = {
 
             this._playIndex++;
             if (this._playIndex >= this._playFrames.length) {
-                this._playIndex = 0; // Loop
+                if (this._continuousPlay) {
+                    // Advance to next month
+                    this._advanceMonth();
+                    return; // _advanceMonth will resume playback after data loads
+                }
+                this._playIndex = 0; // Loop within current range
             }
 
             this._showPlaybackFrame();
@@ -276,7 +295,7 @@ const UIControls = {
         document.getElementById("playback-slider").value = this._playIndex;
         document.getElementById("hour-slider").value = this.currentHour;
         document.getElementById("hour-display").textContent =
-            `${String(this.currentHour).padStart(2, "0")}:00`;
+            this._formatHourAmPm(this.currentHour);
 
         // Update calendar highlight
         document.querySelectorAll(".cal-day.current").forEach(el => el.classList.remove("current"));
@@ -286,6 +305,54 @@ const UIControls = {
 
         this._updateTimeDisplay();
         this._displayCurrentTimestamp();
+    },
+
+    /**
+     * Advance to the next month during continuous playback.
+     * Pauses playback, loads the next month's data, then resumes.
+     */
+    async _advanceMonth() {
+        this._stopPlayback();
+
+        let nextMonth = this.currentMonth + 1;
+        let nextYear = this.currentYear;
+        if (nextMonth > 12) {
+            nextMonth = 1;
+            nextYear++;
+        }
+
+        this.currentYear = nextYear;
+        this.currentMonth = nextMonth;
+        this.currentDay = 1;
+        this.currentHour = 0;
+        this.rangeStart = 1;
+        const daysInMonth = new Date(nextYear, nextMonth, 0).getDate();
+        this.rangeEnd = daysInMonth;
+
+        // Update UI selects
+        document.getElementById("year-select").value = nextYear;
+        document.getElementById("month-select").value = nextMonth;
+
+        this._buildCalendar();
+        this._updateRangeDisplay();
+        this._buildPlaybackFrames();
+        this._playIndex = 0;
+
+        // Load data for new month, then resume
+        await this._loadAndDisplay();
+        if (this._continuousPlay) {
+            this._startPlayback();
+        }
+    },
+
+    /**
+     * Set fire discovery dates for calendar markers.
+     * Called by WildfireOverlay after loading fire data.
+     * @param {Set<number>} daySet - set of day-of-month numbers with fires
+     */
+    setFireDates(daySet) {
+        this._fireDates = daySet || new Set();
+        this._buildCalendar();
     },
 
     // ------------------------------------------------------------------
@@ -301,7 +368,11 @@ const UIControls = {
     },
 
     _updateTimeDisplay() {
-        document.getElementById("full-time-display").textContent = this.getCurrentTimestamp();
+        const y = this.currentYear;
+        const m = String(this.currentMonth).padStart(2, "0");
+        const d = String(this.currentDay).padStart(2, "0");
+        document.getElementById("full-time-display").textContent =
+            `${y}-${m}-${d} ${this._formatHourAmPm(this.currentHour)}`;
     },
 
     _debouncedLoad() {

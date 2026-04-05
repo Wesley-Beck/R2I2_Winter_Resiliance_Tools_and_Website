@@ -27,19 +27,33 @@
 
         <div id="main-container">
             <aside id="sidebar">
-                <!-- Data Directory -->
-                <section class="panel" id="data-dir-panel">
-                    <h3>Data Directory</h3>
-                    <div class="input-group">
-                        <input type="text" id="data-path" value="../data/output"
-                               placeholder="Path to data/output" />
-                        <button id="load-data-btn" class="btn">Load</button>
-                    </div>
+                <!-- Data Source -->
+                <section class="panel" id="source-panel">
+                    <h3>Data Source</h3>
+                    <select id="data-source-select" class="full-width">
+                        <option value="../data/output" selected>AORC (Historical)</option>
+                        <option value="../data/output_glarm_rcp45">GLARM RCP 4.5 (Projected)</option>
+                        <option value="../data/output_glarm_rcp85">GLARM RCP 8.5 (Projected)</option>
+                    </select>
                 </section>
 
                 <!-- Layer Selector -->
                 <section class="panel" id="layer-panel">
                     <h3>Data Layer</h3>
+
+                    <div class="layer-group">
+                        <h4>Fire Danger Indices</h4>
+                        <select id="layer-fdi" class="layer-select">
+                            <option value="">-- Select --</option>
+                            <option value="cfwi/FWI">FWI (Fire Weather Index)</option>
+                            <option value="cfwi/ISI">ISI (Initial Spread Index)</option>
+                            <option value="cfwi/BUI">BUI (Buildup Index)</option>
+                            <option value="nfdrs/ERC">ERC (Energy Release Component)</option>
+                            <option value="nfdrs/BI">BI (Burning Index)</option>
+                            <option value="nfdrs/SC">SC (Spread Component)</option>
+                            <option value="fpi/FPI">FPI (Fire Potential Index)</option>
+                        </select>
+                    </div>
 
                     <div class="layer-group">
                         <h4>Weather</h4>
@@ -151,6 +165,12 @@
                             <option value="50">Fast</option>
                         </select>
                     </div>
+                    <div class="input-group" style="margin-top: 4px;">
+                        <label style="font-size: 0.75rem;">
+                            <input type="checkbox" id="continuous-toggle" />
+                            Continue across months
+                        </label>
+                    </div>
 
                     <!-- Current time display -->
                     <div class="time-display" id="full-time-display">
@@ -158,18 +178,19 @@
                     </div>
                 </section>
 
-                <!-- Wildfire Overlay -->
+                <!-- Wildfire History -->
                 <section class="panel" id="wildfire-panel">
                     <h3>Wildfire History</h3>
                     <div class="input-group">
                         <label>
                             <input type="checkbox" id="wildfire-toggle" />
-                            Show wildfire perimeters
+                            Show fire perimeters
                         </label>
                     </div>
                     <div id="wildfire-info" class="meta-note" style="font-size: 0.75rem; margin-top: 4px;">
                         Source: NIFC Interagency Fire Perimeters
                     </div>
+                    <div id="fire-list" style="max-height: 200px; overflow-y: auto; margin-top: 6px;"></div>
                 </section>
 
                 <!-- Color Legend -->
