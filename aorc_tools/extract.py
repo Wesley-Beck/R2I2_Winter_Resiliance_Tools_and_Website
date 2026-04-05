@@ -105,11 +105,12 @@ def extract_month(year, month, points_df, output_base, loader=None,
                   fuel_model="G", fuel_moisture_method="emc",
                   fwi_state=None, fm_state=None, latitude=46.5,
                   callback=None, output_format="both",
-                  csv_precision=None, skip_raw=False):
+                  csv_precision=None, skip_raw=False, mirror=None):
     """Extract one month of hourly AORC data and compute all indices.
 
-    Uses parallel S3 prefetching: downloads the next day while processing
-    the current one, roughly doubling throughput.
+    Data source priority:
+    1. Local mirror (if mirror= provided and month is downloaded) — instant
+    2. S3 with 6-day batch prefetch — network I/O bound
 
     Args:
         year, month: Time period.
@@ -123,6 +124,8 @@ def extract_month(year, month, points_df, output_base, loader=None,
         callback: Optional function(progress_pct, message).
         output_format: "sqlite" | "csv" | "both" (default "both").
         csv_precision: Decimal places for CSV export (None = full precision).
+        skip_raw: If True, skip saving raw AORC variables (saves ~30% time/space).
+        mirror: Optional LocalAORCMirror instance for local data access.
         skip_raw: If True, skip saving raw AORC variables (saves ~30% time/space).
 
     Returns:
@@ -171,37 +174,54 @@ def extract_month(year, month, points_df, output_base, loader=None,
     total_hours = n_days * 24
     hours_processed = 0
 
-    # Chunk-based fetching: load 6 days at once to match ZARR chunk boundaries.
-    # ZARR chunks span 144 hours (6 days) on the time axis, so loading
-    # 6 days amortizes S3 overhead — ~5× less redundant data transfer.
-    executor = ThreadPoolExecutor(max_workers=2)
+    # Data source: local mirror (instant disk I/O) or S3 (network I/O)
+    use_local = mirror is not None and mirror.is_downloaded(year, month)
 
-    # Build chunk schedule: [(start_day, end_day), ...]
-    chunks = []
-    d = 1
-    while d <= n_days:
-        end = min(d + CHUNK_DAYS - 1, n_days)
-        chunks.append((d, end))
-        d = end + 1
-
-    # Prefetch first chunk
-    chunk_idx = 0
-    prefetch_future = executor.submit(
-        _prefetch_chunk, loader, year, month, chunks[0][0], chunks[0][1],
-        lat_indices, lon_indices, lat_bounds, lon_bounds,
-    )
-
-    for chunk_start, chunk_end in chunks:
+    if use_local:
+        # Load entire month from local disk in one read (~0.5s vs ~35s from S3)
         if callback:
-            pct = 100.0 * hours_processed / total_hours
-            callback(pct, f"Fetching {year}-{month:02d} days {chunk_start}-{chunk_end}...")
+            callback(0.0, f"Loading {year}-{month:02d} from local mirror...")
+        all_day_data = mirror.load_month(year, month)
+        logger.info("Loaded %d-%02d from local mirror (%d days)",
+                     year, month, len(all_day_data))
+    else:
+        # Chunk-based S3 fetching: load 6 days at once (ZARR chunk alignment)
+        all_day_data = {}
+        executor = ThreadPoolExecutor(max_workers=2)
 
-        try:
-            chunk_data = prefetch_future.result(timeout=300)
-        except Exception as e:
-            logger.error("Failed to fetch AORC chunk %s-%02d days %d-%d: %s",
-                         year, month, chunk_start, chunk_end, e)
-            hours_processed += (chunk_end - chunk_start + 1) * 24
+        chunks = []
+        d = 1
+        while d <= n_days:
+            end = min(d + CHUNK_DAYS - 1, n_days)
+            chunks.append((d, end))
+            d = end + 1
+
+        chunk_idx = 0
+        prefetch_future = executor.submit(
+            _prefetch_chunk, loader, year, month, chunks[0][0], chunks[0][1],
+            lat_indices, lon_indices, lat_bounds, lon_bounds,
+        )
+
+        for chunk_start, chunk_end in chunks:
+            if callback:
+                pct = 100.0 * hours_processed / total_hours
+                callback(pct, f"Fetching {year}-{month:02d} days {chunk_start}-{chunk_end}...")
+
+            try:
+                chunk_data = prefetch_future.result(timeout=300)
+            except Exception as e:
+                logger.error("Failed to fetch AORC chunk %s-%02d days %d-%d: %s",
+                             year, month, chunk_start, chunk_end, e)
+                hours_processed += (chunk_end - chunk_start + 1) * 24
+                chunk_idx += 1
+                if chunk_idx < len(chunks):
+                    prefetch_future = executor.submit(
+                        _prefetch_chunk, loader, year, month,
+                        chunks[chunk_idx][0], chunks[chunk_idx][1],
+                        lat_indices, lon_indices, lat_bounds, lon_bounds,
+                    )
+                continue
+
             chunk_idx += 1
             if chunk_idx < len(chunks):
                 prefetch_future = executor.submit(
@@ -209,28 +229,22 @@ def extract_month(year, month, points_df, output_base, loader=None,
                     chunks[chunk_idx][0], chunks[chunk_idx][1],
                     lat_indices, lon_indices, lat_bounds, lon_bounds,
                 )
+
+            all_day_data.update(chunk_data)
+
+        executor.shutdown(wait=False)
+
+    # Process each day
+    for day in range(1, n_days + 1):
+        if day not in all_day_data:
+            hours_processed += 24
             continue
 
-        # Prefetch NEXT chunk while processing this one
-        chunk_idx += 1
-        if chunk_idx < len(chunks):
-            prefetch_future = executor.submit(
-                _prefetch_chunk, loader, year, month,
-                chunks[chunk_idx][0], chunks[chunk_idx][1],
-                lat_indices, lon_indices, lat_bounds, lon_bounds,
-            )
+        daily_data = all_day_data[day]
 
-        # Process each day in the chunk
-        for day in range(chunk_start, chunk_end + 1):
-            if day not in chunk_data:
-                hours_processed += 24
-                continue
-
-            daily_data = chunk_data[day]
-
-            if callback:
-                pct = 100.0 * hours_processed / total_hours
-                callback(pct, f"Processing {year}-{month:02d}-{day:02d}...")
+        if callback:
+            pct = 100.0 * hours_processed / total_hours
+            callback(pct, f"Processing {year}-{month:02d}-{day:02d}...")
 
             actual_hours = daily_data["hours"]
             actual_timestamps = daily_data["timestamps"]
@@ -313,8 +327,6 @@ def extract_month(year, month, points_df, output_base, loader=None,
                         nfdrs_acc.add(key, current, values)
 
                 hours_processed += 1
-
-    executor.shutdown(wait=False)
 
     # Flush SQLite and generate web files
     if db:

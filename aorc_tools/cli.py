@@ -81,8 +81,11 @@ def points(shapefile, output, filter_water, water_min_area):
               help="Output format: sqlite (compact + web files), csv, or both")
 @click.option("--skip-raw/--no-skip-raw", default=False,
               help="Skip raw AORC output (saves ~30% time/space)")
+@click.option("--local-data", default=None,
+              help="Path to local AORC mirror (use 'aorc-tools download' to create)")
 def extract(points_file, year, output, start_month, end_month,
-            fuel_model, fuel_moisture, latitude, output_format, skip_raw):
+            fuel_model, fuel_moisture, latitude, output_format, skip_raw,
+            local_data):
     """Extract hourly AORC data and compute fire danger indices."""
     from aorc_tools.point_filter import load_point_index
     from aorc_tools.extract import extract_year
@@ -90,6 +93,15 @@ def extract(points_file, year, output, start_month, end_month,
     logger.info("Loading points from %s", points_file)
     points_df = load_point_index(points_file)
     logger.info("Loaded %d points", len(points_df))
+
+    # Set up local mirror if path provided
+    mirror = None
+    if local_data:
+        from aorc_tools.local_mirror import LocalAORCMirror
+        mirror = LocalAORCMirror(local_data, points_df)
+        status = mirror.status()
+        logger.info("Local mirror: %d months cached (%.1f GB)",
+                     status["months_downloaded"], status["total_size_gb"])
 
     def progress(pct, msg):
         click.echo(f"  [{pct:5.1f}%] {msg}")
@@ -103,9 +115,87 @@ def extract(points_file, year, output, start_month, end_month,
         latitude=latitude,
         output_format=output_format,
         skip_raw=skip_raw,
+        mirror=mirror,
         callback=progress,
     )
     click.echo(f"Extraction complete for {year}")
+
+
+@main.command()
+@click.option("--points", "points_file", required=True, help="Path to points_index.csv")
+@click.option("--mirror-dir", required=True, help="Local directory to store AORC data")
+@click.option("--start-year", required=True, type=int, help="Start year (e.g., 1979)")
+@click.option("--end-year", required=True, type=int, help="End year (e.g., 2024)")
+@click.option("--start-month", default=1, type=int, help="Start month in start year")
+@click.option("--end-month", default=12, type=int, help="End month in end year")
+def download(points_file, mirror_dir, start_year, end_year, start_month, end_month):
+    """Download AORC data to local disk for offline computation.
+
+    Downloads only the grid points in your study area (~28K points for WUP),
+    not the full CONUS grid. Approximately 3 GB per year compressed.
+
+    Once downloaded, use --local-data with the extract command to compute
+    fire indices from local data instead of S3 (eliminates network bottleneck).
+    """
+    from aorc_tools.point_filter import load_point_index
+    from aorc_tools.local_mirror import LocalAORCMirror
+
+    points_df = load_point_index(points_file)
+    click.echo(f"Loaded {len(points_df)} points")
+
+    mirror = LocalAORCMirror(mirror_dir, points_df)
+    status = mirror.status()
+    click.echo(f"Mirror: {status['months_downloaded']} months cached "
+               f"({status['total_size_gb']} GB) in {mirror_dir}")
+
+    def progress(year, month, msg):
+        click.echo(f"  {year}-{month:02d}: {msg}")
+
+    count = mirror.download_range(
+        start_year, end_year,
+        start_month=start_month, end_month=end_month,
+        callback=progress,
+    )
+    click.echo(f"Downloaded {count} new months")
+
+    status = mirror.status()
+    click.echo(f"Mirror total: {status['months_downloaded']} months, "
+               f"{status['total_size_gb']} GB")
+
+
+@main.command()
+@click.option("--points", "points_file", required=True, help="Path to points_index.csv")
+@click.option("--mirror-dir", required=True, help="Local AORC mirror directory")
+def sync(points_file, mirror_dir):
+    """Check for new AORC data and download any missing months.
+
+    Compares the local mirror against what's available on S3 and downloads
+    any months that haven't been cached yet.
+    """
+    from aorc_tools.point_filter import load_point_index
+    from aorc_tools.local_mirror import LocalAORCMirror
+
+    points_df = load_point_index(points_file)
+    mirror = LocalAORCMirror(mirror_dir, points_df)
+
+    click.echo("Checking for new AORC data on S3...")
+    missing = mirror.check_for_updates()
+
+    if not missing:
+        click.echo("Local mirror is up to date!")
+        return
+
+    click.echo(f"Found {len(missing)} months to download:")
+    for year, month in missing[:10]:
+        click.echo(f"  {year}-{month:02d}")
+    if len(missing) > 10:
+        click.echo(f"  ... and {len(missing) - 10} more")
+
+    def progress(year, month, msg):
+        click.echo(f"  {year}-{month:02d}: {msg}")
+
+    count = mirror.sync(callback=progress)
+    click.echo(f"Synced {count} new months")
 
 
 @main.command()
