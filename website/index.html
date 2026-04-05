@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WUP Wildfire Risk Explorer</title>
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+          crossorigin="" />
+
+    <!-- App CSS -->
+    <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+    <div id="app">
+        <header id="top-bar">
+            <div class="header-title">
+                <h1>WUP Wildfire Risk Explorer</h1>
+                <span class="subtitle">Western Upper Peninsula of Michigan</span>
+            </div>
+            <div class="header-status" id="status-bar">
+                <span id="status-text">Loading...</span>
+            </div>
+        </header>
+
+        <div id="main-container">
+            <aside id="sidebar">
+                <!-- Data Directory -->
+                <section class="panel" id="data-dir-panel">
+                    <h3>Data Directory</h3>
+                    <div class="input-group">
+                        <input type="text" id="data-path" value="../data/output"
+                               placeholder="Path to data/output" />
+                        <button id="load-data-btn" class="btn">Load</button>
+                    </div>
+                </section>
+
+                <!-- Layer Selector -->
+                <section class="panel" id="layer-panel">
+                    <h3>Data Layer</h3>
+
+                    <div class="layer-group">
+                        <h4>Weather</h4>
+                        <select id="layer-weather" class="layer-select">
+                            <option value="">-- Select --</option>
+                            <option value="converted/temperature_c">Temperature (&deg;C)</option>
+                            <option value="converted/temperature_f">Temperature (&deg;F)</option>
+                            <option value="converted/relative_humidity">Relative Humidity (%)</option>
+                            <option value="converted/wind_speed_kph">Wind Speed (km/h)</option>
+                            <option value="converted/wind_speed_mph">Wind Speed (mph)</option>
+                            <option value="converted/precipitation_mm">Precipitation (mm)</option>
+                        </select>
+                    </div>
+
+                    <div class="layer-group">
+                        <h4>Canadian FWI</h4>
+                        <select id="layer-cfwi" class="layer-select">
+                            <option value="">-- Select --</option>
+                            <option value="cfwi/FFMC">FFMC (Fine Fuel Moisture Code)</option>
+                            <option value="cfwi/DMC">DMC (Duff Moisture Code)</option>
+                            <option value="cfwi/DC">DC (Drought Code)</option>
+                            <option value="cfwi/ISI">ISI (Initial Spread Index)</option>
+                            <option value="cfwi/BUI">BUI (Buildup Index)</option>
+                            <option value="cfwi/FWI" selected>FWI (Fire Weather Index)</option>
+                        </select>
+                    </div>
+
+                    <div class="layer-group">
+                        <h4>NFDRS</h4>
+                        <select id="layer-nfdrs" class="layer-select">
+                            <option value="">-- Select --</option>
+                            <option value="nfdrs/FM1">1-hr Fuel Moisture (%)</option>
+                            <option value="nfdrs/FM10">10-hr Fuel Moisture (%)</option>
+                            <option value="nfdrs/FM100">100-hr Fuel Moisture (%)</option>
+                            <option value="nfdrs/FM1000">1000-hr Fuel Moisture (%)</option>
+                            <option value="nfdrs/SC">SC (Spread Component)</option>
+                            <option value="nfdrs/ERC">ERC (Energy Release Component)</option>
+                            <option value="nfdrs/BI">BI (Burning Index)</option>
+                        </select>
+                    </div>
+
+                    <div class="layer-group">
+                        <h4>Fire Potential Index</h4>
+                        <select id="layer-fpi" class="layer-select">
+                            <option value="">-- Select --</option>
+                            <option value="fpi/RG">Relative Greenness</option>
+                            <option value="fpi/EMC">EMC (%)</option>
+                            <option value="fpi/FPI">FPI (Fire Potential Index)</option>
+                        </select>
+                    </div>
+                </section>
+
+                <!-- Time Controls -->
+                <section class="panel" id="time-panel">
+                    <h3>Time</h3>
+                    <div class="input-group">
+                        <label for="date-picker">Date</label>
+                        <input type="date" id="date-picker" value="2020-07-15" />
+                    </div>
+                    <div class="input-group">
+                        <label for="hour-slider">Hour: <span id="hour-display">12:00</span></label>
+                        <input type="range" id="hour-slider" min="0" max="23" value="12" />
+                    </div>
+                    <div class="time-display" id="full-time-display">
+                        2020-07-15 12:00
+                    </div>
+                </section>
+
+                <!-- Color Legend -->
+                <section class="panel" id="legend-panel">
+                    <h3>Legend</h3>
+                    <div id="legend-bar">
+                        <div id="legend-gradient"></div>
+                        <div id="legend-labels">
+                            <span id="legend-min">0</span>
+                            <span id="legend-max">100</span>
+                        </div>
+                    </div>
+                    <div id="legend-title"></div>
+                </section>
+
+                <!-- Point Info (shown on click) -->
+                <section class="panel" id="info-panel" style="display: none;">
+                    <h3>Point Details</h3>
+                    <div id="point-info"></div>
+                </section>
+
+                <!-- Metadata -->
+                <section class="panel" id="metadata-panel">
+                    <h3>Data Source</h3>
+                    <div id="metadata-info">
+                        <p class="meta-note">NOAA AORC v1.1 (~800m, hourly)</p>
+                        <p class="meta-note" id="provenance-note"></p>
+                    </div>
+                </section>
+            </aside>
+
+            <div id="map-container">
+                <div id="map"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+            crossorigin=""></script>
+
+    <!-- PapaParse for CSV loading -->
+    <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
+
+    <!-- App JS -->
+    <script src="js/color-scales.js"></script>
+    <script src="js/data-loader.js"></script>
+    <script src="js/map-layer.js"></script>
+    <script src="js/ui-controls.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>

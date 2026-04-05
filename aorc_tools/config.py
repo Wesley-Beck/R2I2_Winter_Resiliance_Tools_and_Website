@@ -64,8 +64,8 @@ AORC_VARIABLES = {
 WUP_COUNTIES = ["Houghton", "Keweenaw", "Ontonagon", "Gogebic", "Iron", "Baraga"]
 
 # Approximate bounding box (WGS84) covering all 6 WUP counties
-WUP_LAT_BOUNDS = (46.0, 47.6)
-WUP_LON_BOUNDS = (-90.5, -87.5)
+WUP_LAT_BOUNDS = (45.9, 48.25)  # Extended north to include full Isle Royale
+WUP_LON_BOUNDS = (-90.5, -87.4)  # Extended east for Isle Royale's Blake Point
 
 
 # =============================================================================

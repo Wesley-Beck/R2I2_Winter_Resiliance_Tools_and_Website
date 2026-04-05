@@ -1,0 +1,318 @@
+/* =============================================================================
+   Copper Country Theme — WUP Wildfire Risk Explorer
+   Palette: copper, burnt orange, rust, warm cream on dark slate
+   ============================================================================= */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: #1a1a1a;
+    color: #e8d5c4;
+    overflow: hidden;
+    height: 100vh;
+}
+
+#app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+}
+
+/* --- Header --- */
+
+#top-bar {
+    background: #4a2c17;
+    padding: 8px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 2px solid #c87533;
+    flex-shrink: 0;
+}
+
+.header-title h1 {
+    font-size: 1.3rem;
+    font-weight: 600;
+    color: #f0c27a;
+    letter-spacing: 0.5px;
+}
+
+.header-title .subtitle {
+    font-size: 0.8rem;
+    color: #c4a882;
+    margin-left: 4px;
+}
+
+.header-status {
+    font-size: 0.75rem;
+    color: #a08060;
+}
+
+/* --- Main Layout --- */
+
+#main-container {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+}
+
+/* --- Sidebar --- */
+
+#sidebar {
+    width: 320px;
+    min-width: 320px;
+    background: #2d2017;
+    overflow-y: auto;
+    border-right: 1px solid #5c3a20;
+    padding: 10px;
+    flex-shrink: 0;
+}
+
+.panel {
+    background: #3a271a;
+    border: 1px solid #5c3a20;
+    border-radius: 6px;
+    padding: 12px;
+    margin-bottom: 10px;
+}
+
+.panel h3 {
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #c87533;
+    margin-bottom: 8px;
+    border-bottom: 1px solid #5c3a20;
+    padding-bottom: 4px;
+}
+
+.panel h4 {
+    font-size: 0.75rem;
+    color: #a08060;
+    margin: 6px 0 4px;
+}
+
+/* --- Forms --- */
+
+.input-group {
+    margin-bottom: 8px;
+}
+
+.input-group label {
+    display: block;
+    font-size: 0.75rem;
+    color: #a08060;
+    margin-bottom: 2px;
+}
+
+input[type="text"],
+input[type="date"],
+select {
+    width: 100%;
+    background: #1a1a1a;
+    border: 1px solid #5c3a20;
+    color: #e8d5c4;
+    padding: 6px 8px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+}
+
+input[type="text"]:focus,
+input[type="date"]:focus,
+select:focus {
+    border-color: #c87533;
+    outline: none;
+}
+
+input[type="range"] {
+    width: 100%;
+    accent-color: #c87533;
+}
+
+.btn {
+    background: #c87533;
+    color: #1a1a1a;
+    border: none;
+    padding: 6px 14px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: 600;
+    margin-top: 4px;
+}
+
+.btn:hover {
+    background: #d4853c;
+}
+
+.layer-select {
+    cursor: pointer;
+}
+
+.layer-group {
+    margin-bottom: 4px;
+}
+
+/* --- Time Display --- */
+
+.time-display {
+    text-align: center;
+    font-size: 1rem;
+    font-weight: 600;
+    color: #f0c27a;
+    padding: 6px 0;
+    background: #1a1a1a;
+    border-radius: 4px;
+    margin-top: 4px;
+}
+
+/* --- Legend --- */
+
+#legend-bar {
+    margin: 8px 0;
+}
+
+#legend-gradient {
+    height: 16px;
+    border-radius: 3px;
+    background: linear-gradient(to right, #2b5c3f, #4a8c3f, #a5c44e, #f5d36e, #e89530, #c84e1d, #7a1a0f);
+}
+
+#legend-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.7rem;
+    color: #a08060;
+    margin-top: 2px;
+}
+
+#legend-title {
+    text-align: center;
+    font-size: 0.7rem;
+    color: #c4a882;
+    margin-top: 2px;
+}
+
+/* --- Point Info --- */
+
+#point-info {
+    font-size: 0.75rem;
+    line-height: 1.5;
+}
+
+#point-info .info-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 2px 0;
+    border-bottom: 1px solid #3a271a;
+}
+
+#point-info .info-label {
+    color: #a08060;
+}
+
+#point-info .info-value {
+    color: #f0c27a;
+    font-weight: 500;
+}
+
+#point-info .info-header {
+    font-weight: 600;
+    color: #c87533;
+    margin-top: 6px;
+    margin-bottom: 2px;
+}
+
+/* --- Metadata --- */
+
+.meta-note {
+    font-size: 0.7rem;
+    color: #a08060;
+    line-height: 1.4;
+    margin-bottom: 4px;
+}
+
+/* --- Map --- */
+
+#map-container {
+    flex: 1;
+    position: relative;
+}
+
+#map {
+    width: 100%;
+    height: 100%;
+}
+
+/* Leaflet popup styling */
+.leaflet-popup-content-wrapper {
+    background: #3a271a;
+    color: #e8d5c4;
+    border: 1px solid #c87533;
+    border-radius: 6px;
+}
+
+.leaflet-popup-tip {
+    background: #3a271a;
+    border: 1px solid #c87533;
+}
+
+.leaflet-popup-content {
+    font-size: 0.8rem;
+    margin: 8px 12px;
+}
+
+/* Loading overlay */
+#map .loading-overlay {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(42, 32, 23, 0.9);
+    color: #f0c27a;
+    padding: 16px 24px;
+    border-radius: 8px;
+    border: 1px solid #c87533;
+    z-index: 1000;
+    font-size: 0.9rem;
+}
+
+/* --- Scrollbar --- */
+
+#sidebar::-webkit-scrollbar {
+    width: 6px;
+}
+
+#sidebar::-webkit-scrollbar-track {
+    background: #2d2017;
+}
+
+#sidebar::-webkit-scrollbar-thumb {
+    background: #5c3a20;
+    border-radius: 3px;
+}
+
+#sidebar::-webkit-scrollbar-thumb:hover {
+    background: #c87533;
+}
+
+/* --- Responsive --- */
+
+@media (max-width: 768px) {
+    #main-container {
+        flex-direction: column;
+    }
+
+    #sidebar {
+        width: 100%;
+        min-width: unset;
+        max-height: 40vh;
+        border-right: none;
+        border-bottom: 1px solid #5c3a20;
+    }
+}
