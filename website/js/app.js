@@ -51,6 +51,7 @@ const DOWNSCALING = {
             period:    "2015 – 2100",
             variables: "T, RH, precip, wind (no radiation)",
             source:    "NASA NEX-GDDP-CMIP6 (Thrasher et al. 2022)",
+            hasVars:   ["T", "RH", "wind", "precip"],
         },
         chain: (gcm) => `${gcm} → BCSD statistical → 0.25° grid`,
     },
@@ -69,6 +70,7 @@ const DOWNSCALING = {
             period:    "Hist: 1995–2014 | Mid: 2045–2064 | End: 2075–2094",
             variables: "T, Tmin, Tmax, precip, wind, humidity",
             source:    "Argonne National Lab ClimRR (CESM2 → WRF)",
+            hasVars:   ["T", "RH", "wind", "precip"],
         },
         chain: (gcm) => `${gcm} → WRF (Argonne) → 12 km grid`,
     },
@@ -87,6 +89,7 @@ const DOWNSCALING = {
             period:    "1981 – 2099",
             variables: "T, Q, wind, precip, SW/LW radiation",
             source:    "GLARM-Proj1, Michigan Tech (Xue et al. 2022)",
+            hasVars:   ["T", "RH", "wind", "precip", "radiation"],
         },
         chain: () => "GCM ensemble → RegCM4 → 18 km grid",
     },
@@ -104,6 +107,20 @@ function getDownscalingKeys(gcm) {
 // Historical dataset metadata
 // =====================================================================
 
+// =====================================================================
+// Fire Danger Index variable requirements
+// =====================================================================
+
+/**
+ * Maps each FDI system to the weather variables it requires.
+ * Used to determine which indices a dataset can compute.
+ */
+const FDI_REQUIREMENTS = {
+    cfwi: { label: "Canadian FWI", needs: ["T", "RH", "wind", "precip"] },
+    nfdrs: { label: "NFDRS", needs: ["T", "RH", "wind", "precip"] },
+    fpi: { label: "FPI", needs: ["T", "RH"] },
+};
+
 const HISTORICAL = {
 
     // --- Reanalysis (Observed + Modeled) ---
@@ -117,6 +134,7 @@ const HISTORICAL = {
         variables: "Full suite (T, RH, wind U/V, precip, SW/LW radiation, pressure)",
         source:    "NOAA AORC v1.1 (Analysis of Record for Calibration)",
         access:    "S3: s3://noaa-nws-aorc-v1-1-1km (ZARR)",
+        hasVars:   ["T", "RH", "wind", "precip", "radiation", "pressure"],
     },
     nldas2: {
         badges:    ["observed", "reanalysis", "hourly"],
@@ -127,6 +145,7 @@ const HISTORICAL = {
         variables: "T, precip, RH, wind, SW/LW radiation, surface pressure",
         source:    "NASA NLDAS-2 (North American Land Data Assimilation System)",
         access:    "NASA GES DISC (OPeNDAP, HTTPS). Requires Earthdata login.",
+        hasVars:   ["T", "RH", "wind", "precip", "radiation", "pressure"],
     },
     era5: {
         badges:    ["observed", "reanalysis", "hourly", "global"],
@@ -137,6 +156,7 @@ const HISTORICAL = {
         variables: "200+ vars: T, wind (multi-level), precip, RH, radiation, CAPE, soil, snow",
         source:    "ECMWF ERA5 (Hersbach et al. 2020)",
         access:    "S3: s3://era5-pds/ (AWS Open Data). Also Copernicus CDS API.",
+        hasVars:   ["T", "RH", "wind", "precip", "radiation", "pressure"],
     },
     era5land: {
         badges:    ["observed", "reanalysis", "hourly"],
@@ -147,6 +167,7 @@ const HISTORICAL = {
         variables: "T (2m), dewpoint, wind, precip, snow, soil moisture/temp, runoff, evaporation",
         source:    "ECMWF ERA5-Land (Mu\u00f1oz-Sabater et al. 2021)",
         access:    "Copernicus CDS API. Also Google Cloud.",
+        hasVars:   ["T", "RH", "wind", "precip"],
     },
     narr: {
         badges:    ["observed", "reanalysis", "subhourly"],
@@ -157,6 +178,7 @@ const HISTORICAL = {
         variables: "T, precip, wind, RH, radiation, pressure, soil moisture, snow, clouds",
         source:    "NCEP NARR (North American Regional Reanalysis)",
         access:    "NCEI THREDDS/OPeNDAP, NOMADS. No S3.",
+        hasVars:   ["T", "RH", "wind", "precip", "radiation", "pressure"],
     },
     hrrr: {
         badges:    ["modeled", "reanalysis", "hourly", "highres"],
@@ -167,6 +189,7 @@ const HISTORICAL = {
         variables: "T, wind, precip, RH, radiation, snow, CAPE, visibility, smoke (HRRRsmoke)",
         source:    "NOAA HRRR (High-Resolution Rapid Refresh)",
         access:    "S3: s3://noaa-hrrr-bdp-pds/ (GRIB2). Zarr: s3://hrrrzarr/",
+        hasVars:   ["T", "RH", "wind", "precip", "radiation"],
     },
     rtma: {
         badges:    ["observed", "reanalysis", "hourly", "highres"],
@@ -177,6 +200,7 @@ const HISTORICAL = {
         variables: "T, dewpoint, wind U/V + gust, pressure, visibility, ceiling, precip (URMA)",
         source:    "NOAA RTMA/URMA (Real-Time / UnRestricted Mesoscale Analysis)",
         access:    "S3: s3://noaa-rtma-pds/, s3://noaa-urma-pds/",
+        hasVars:   ["T", "RH", "wind", "precip", "pressure"],
     },
 
     // --- Gridded Observations (Station-interpolated) ---
@@ -190,6 +214,7 @@ const HISTORICAL = {
         variables: "Tmax, Tmin, Tmean, precip, dewpoint, VPD",
         source:    "PRISM Climate Group (Oregon State University)",
         access:    "PRISM FTP/HTTP. Also on Google Earth Engine.",
+        hasVars:   ["T", "RH", "precip"],  // dewpoint → RH derivable, no wind
     },
     daymet: {
         badges:    ["observed", "station", "daily", "highres"],
@@ -200,6 +225,7 @@ const HISTORICAL = {
         variables: "Tmax, Tmin, precip, shortwave radiation, vapor pressure, SWE, day length",
         source:    "Daymet v4 (ORNL DAAC, Thornton et al.)",
         access:    "S3: s3://daymet-v4-na/ (AWS Open Data). Also THREDDS.",
+        hasVars:   ["T", "RH", "precip", "radiation"],  // vapor pressure → RH derivable, no wind
     },
     gridmet: {
         badges:    ["observed", "station", "daily"],
@@ -210,6 +236,7 @@ const HISTORICAL = {
         variables: "Tmax, Tmin, precip, wind, RH, radiation, ET, VPD, fire indices (ERC, BI, FM100)",
         source:    "GridMET (Climatology Lab, Abatzoglou 2013)",
         access:    "Climatology Lab HTTP. Also Google Earth Engine.",
+        hasVars:   ["T", "RH", "wind", "precip", "radiation"],
     },
     livneh: {
         badges:    ["observed", "station", "daily"],
@@ -220,6 +247,7 @@ const HISTORICAL = {
         variables: "Tmax, Tmin, precip, wind",
         source:    "Livneh et al. (USGS/NCAR)",
         access:    "NCAR Climate Data Gateway, USGS ScienceBase.",
+        hasVars:   ["T", "wind", "precip"],  // no RH or humidity variable
     },
 
     // --- Radar / Satellite Derived ---
@@ -233,6 +261,7 @@ const HISTORICAL = {
         variables: "Precip rate/accumulation, radar reflectivity, rotation, hail indicators",
         source:    "NOAA MRMS (Multi-Radar Multi-Sensor)",
         access:    "S3: s3://noaa-mrms-pds/ (AWS NODD). Also Iowa Mesonet archive.",
+        hasVars:   ["precip"],
     },
     cpc: {
         badges:    ["observed", "station", "daily"],
@@ -243,6 +272,7 @@ const HISTORICAL = {
         variables: "Precipitation (unified gauge); separately: Tmax, Tmin",
         source:    "NOAA CPC Unified (Climate Prediction Center)",
         access:    "CPC FTP. Also NOAA PSL OPeNDAP.",
+        hasVars:   ["T", "precip"],
     },
 };
 
@@ -279,6 +309,7 @@ const App = {
         UIControls.init();
         this._initSourceSelectors();
         this._updateInfoCard();
+        this._updateFdiAvailability();
         await this.loadPoints();
     },
 
@@ -326,6 +357,7 @@ const App = {
     /** Common handler: any filter changed → update card + load data. */
     _onFilterChange() {
         this._updateInfoCard();
+        this._updateFdiAvailability();
         this._applySource();
     },
 
@@ -429,6 +461,110 @@ const App = {
             accessEl.textContent = info.access;
         } else {
             accessRow.style.display = "none";
+        }
+    },
+
+    // ------------------------------------------------------------------
+    // FDI capability checking
+    // ------------------------------------------------------------------
+
+    /**
+     * Get the hasVars array for the current data source selection.
+     */
+    _getCurrentHasVars() {
+        if (this._mode === "historical") {
+            const dsKey = document.getElementById("hist-dataset-select").value;
+            const ds = HISTORICAL[dsKey] || HISTORICAL.aorc;
+            return ds.hasVars || [];
+        }
+        const dsKey = document.getElementById("downscaling-select").value;
+        const d = DOWNSCALING[dsKey];
+        return (d && d.info && d.info.hasVars) ? d.info.hasVars : [];
+    },
+
+    /**
+     * Check if a dataset can compute a specific FDI system.
+     * @param {string[]} hasVars - variables the dataset provides
+     * @param {string} fdiKey - key into FDI_REQUIREMENTS (cfwi, nfdrs, fpi)
+     * @returns {boolean}
+     */
+    _canComputeFdi(hasVars, fdiKey) {
+        const req = FDI_REQUIREMENTS[fdiKey];
+        if (!req) return false;
+        return req.needs.every(v => hasVars.includes(v));
+    },
+
+    /**
+     * Update layer panel dropdowns: disable FDI options the current dataset
+     * cannot compute, and show an FDI capability summary on the info card.
+     */
+    _updateFdiAvailability() {
+        const hasVars = this._getCurrentHasVars();
+
+        // Map layer select IDs to their FDI system key
+        const fdiSelects = {
+            "layer-fdi": null,     // composite — check per-option
+            "layer-cfwi": "cfwi",
+            "layer-nfdrs": "nfdrs",
+            "layer-fpi": "fpi",
+        };
+
+        for (const [selId, fdiKey] of Object.entries(fdiSelects)) {
+            const sel = document.getElementById(selId);
+            if (!sel) continue;
+
+            const options = sel.querySelectorAll("option");
+            options.forEach(opt => {
+                if (!opt.value) return; // skip placeholder
+
+                let canCompute;
+                if (fdiKey) {
+                    canCompute = this._canComputeFdi(hasVars, fdiKey);
+                } else {
+                    // Composite FDI dropdown — check by option value prefix
+                    const prefix = opt.value.split("/")[0];
+                    canCompute = this._canComputeFdi(hasVars, prefix);
+                }
+
+                opt.disabled = !canCompute;
+                opt.style.color = canCompute ? "" : "#5c3a20";
+            });
+
+            // If current selection is now disabled, reset to placeholder
+            if (sel.value && sel.selectedOptions[0] && sel.selectedOptions[0].disabled) {
+                sel.value = "";
+            }
+        }
+
+        // Update FDI capability badges on info card
+        this._renderFdiBadges(hasVars);
+    },
+
+    /**
+     * Render FDI capability indicators below the existing badges on the info card.
+     */
+    _renderFdiBadges(hasVars) {
+        let container = document.getElementById("card-fdi-badges");
+        if (!container) {
+            // Create container after main badges
+            const badgesEl = document.getElementById("card-badges");
+            container = document.createElement("div");
+            container.id = "card-fdi-badges";
+            container.className = "source-card-badges";
+            container.style.marginTop = "4px";
+            badgesEl.parentNode.insertBefore(container, badgesEl.nextSibling);
+        }
+        container.innerHTML = "";
+
+        for (const [key, req] of Object.entries(FDI_REQUIREMENTS)) {
+            const can = this._canComputeFdi(hasVars, key);
+            const span = document.createElement("span");
+            span.className = `source-badge ${can ? "badge-fdi-yes" : "badge-fdi-no"}`;
+            span.textContent = `${req.label}: ${can ? "Yes" : "No"}`;
+            span.title = can
+                ? `Can compute ${req.label} (has ${req.needs.join(", ")})`
+                : `Missing: ${req.needs.filter(v => !hasVars.includes(v)).join(", ")}`;
+            container.appendChild(span);
         }
     },
 

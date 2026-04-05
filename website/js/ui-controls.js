@@ -26,6 +26,7 @@ const UIControls = {
     _loadDebounceTimer: null,
     _isLoading: false,
     _fireDates: new Set(),  // days in current month with fire discoveries
+    _monthHasData: false,   // whether current month has computed data for selected layer
 
     /**
      * Format an hour (0-23) as AM/PM string.
@@ -60,6 +61,7 @@ const UIControls = {
                 selects.forEach(s => { if (s !== e.target) s.value = ""; });
                 this.currentLayerPath = value;
                 this._debouncedLoad();
+                this._probeDataAvailability();
             });
         });
 
@@ -68,6 +70,7 @@ const UIControls = {
             this.currentYear = parseInt(e.target.value);
             this._buildCalendar();
             this._debouncedLoad();
+            this._probeDataAvailability();
         });
 
         // Month change
@@ -75,6 +78,7 @@ const UIControls = {
             this.currentMonth = parseInt(e.target.value);
             this._buildCalendar();
             this._debouncedLoad();
+            this._probeDataAvailability();
         });
 
         // Hour slider
@@ -150,6 +154,7 @@ const UIControls = {
             if (d > this.rangeStart && d < this.rangeEnd) cell.classList.add("in-range");
             if (d === this.currentDay) cell.classList.add("current");
             if (this._fireDates.has(d)) cell.classList.add("fire-day");
+            if (this._monthHasData) cell.classList.add("has-data");
 
             cell.addEventListener("click", () => this._onDayClick(d));
             container.appendChild(cell);
@@ -346,6 +351,25 @@ const UIControls = {
         this._buildCalendar();
     },
 
+    /**
+     * Probe whether computed data exists for the current month + layer.
+     * Updates calendar cells with a 50% opacity highlight if data exists.
+     * Since data is stored per-month (not per-day), it's all-or-nothing.
+     */
+    async _probeDataAvailability() {
+        if (!this.currentLayerPath) {
+            this._monthHasData = false;
+            this._buildCalendar();
+            return;
+        }
+
+        const status = await DataLoader.probeMonthAvailability(
+            this.currentYear, this.currentMonth, this.currentLayerPath
+        );
+        this._monthHasData = (status === "full");
+        this._buildCalendar();
+    },
+
     // ------------------------------------------------------------------
     // Timestamp & Data Display
     // ------------------------------------------------------------------
@@ -487,34 +511,6 @@ const UIControls = {
             };
             const fn = HIST_PROVENANCE[ds] || HIST_PROVENANCE.aorc;
             note = fn();
-        }
-        document.getElementById("provenance-note").textContent = note;
-    },
-};
-        let note = "";
-
-        if (src.mode === "future") {
-            const ds = src.downscaling || "bcsd";
-            const scen = src.scenario || "";
-            const gcm = src.gcm || "";
-
-            if (ds === "regcm4") {
-                const rcp = scen === "rcp45" ? "RCP 4.5" : "RCP 8.5";
-                note = `Modeled: GCM ensemble → RegCM4 dynamical RCM (18 km). ${rcp}. Source: GLARM-Proj1.`;
-            } else if (ds === "wrf") {
-                const ssp = scen === "ssp245" ? "SSP2-4.5" : "SSP5-8.5";
-                note = `Modeled: ${gcm} → WRF dynamical RCM (12 km). ${ssp}. Source: Argonne ClimRR.`;
-            } else {
-                const ssp = scen === "ssp245" ? "SSP2-4.5" : "SSP5-8.5";
-                note = `Modeled: ${gcm} → BCSD statistical (0.25°). ${ssp}. Source: NASA NEX-GDDP-CMIP6.`;
-            }
-        } else {
-            // Historical AORC — provenance varies by data era
-            if (y < 1995) note = "Observed + reanalysis: Stage II + CMORPH satellite precip. GDAS/MERRA2 non-precip fields.";
-            else if (y < 2002) note = "Observed + reanalysis: NEXRAD Stage II hourly precip. GDAS/MERRA2 non-precip fields.";
-            else if (y < 2016) note = "Observed + reanalysis: Stage IV gauge-calibrated NEXRAD precip. GDAS/MERRA2 non-precip.";
-            else if (y < 2018) note = "Observed + reanalysis: Stage IV precip. NLDAS-2 to URMA transition blend.";
-            else note = "Observed + reanalysis: Stage IV gauge-calibrated NEXRAD precip. URMA reanalysis (2.5 km).";
         }
         document.getElementById("provenance-note").textContent = note;
     },

@@ -282,6 +282,50 @@ const DataLoader = {
     },
 
     /**
+     * Probe which days in a month have computed data for a given layer.
+     * Uses HEAD requests to check if .bin files exist.
+     * Returns a Set of day numbers (1-31) that have data, or "full" if the
+     * whole month file exists (since our data is stored per-month, not per-day).
+     *
+     * @param {number} year
+     * @param {number} month
+     * @param {string} layerPath - e.g. "cfwi/FWI"
+     * @returns {Promise<"full"|"none">} "full" if month file exists, "none" otherwise
+     */
+    async probeMonthAvailability(year, month, layerPath) {
+        const monthStr = String(month).padStart(2, "0");
+        const parts = layerPath.split("/");
+        const variable = parts.length > 1 ? parts[1] : parts[0];
+        const binUrl = `${this.basePath}/${year}/${monthStr}/web/${variable}.bin`;
+
+        try {
+            const resp = await fetch(binUrl, { method: "HEAD" });
+            return resp.ok ? "full" : "none";
+        } catch {
+            return "none";
+        }
+    },
+
+    /**
+     * Probe multiple months to determine data availability range.
+     * Returns an object mapping "YYYY-MM" to "full"|"none".
+     *
+     * @param {number} year
+     * @param {number[]} months - array of month numbers to check
+     * @param {string} layerPath
+     * @returns {Promise<Object>}
+     */
+    async probeYearAvailability(year, months, layerPath) {
+        const results = {};
+        const promises = months.map(async (m) => {
+            const status = await this.probeMonthAvailability(year, m, layerPath);
+            results[`${year}-${String(m).padStart(2, "0")}`] = status;
+        });
+        await Promise.all(promises);
+        return results;
+    },
+
+    /**
      * Legacy compatibility: get values as { pointId: value } object.
      * Only used for point click info display (single point, not 28K).
      */

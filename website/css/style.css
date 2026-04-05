@@ -627,6 +627,36 @@ select.full-width {
     border: 1px solid #2a4a4a;
 }
 
+/* FDI capability badges */
+
+.badge-fdi-yes {
+    background: #1a4a2a;
+    color: #80d090;
+    border: 1px solid #2a6a3a;
+}
+
+.badge-fdi-no {
+    background: #3a1a1a;
+    color: #a06060;
+    border: 1px solid #5a2a2a;
+}
+
+/* Calendar data availability highlight */
+
+.cal-day.has-data {
+    background: rgba(200, 117, 51, 0.15);
+}
+
+.cal-day.has-data:hover {
+    background: rgba(200, 117, 51, 0.35);
+}
+
+/* Disabled layer options */
+
+select.layer-select option:disabled {
+    color: #5c3a20;
+}
+
 /* Model chain display */
 #card-chain {
     font-family: 'Courier New', monospace;
