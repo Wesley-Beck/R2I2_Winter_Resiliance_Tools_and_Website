@@ -410,7 +410,7 @@ const ExportAnimation = {
             if (scale && scale.stops) {
                 for (let px = 0; px < barW; px++) {
                     const t = px / barW;
-                    const rgb = this._interpolateStops(scale.stops, t);
+                    const rgb = interpolateColor(scale, t);
                     ctx.fillStyle = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
                     ctx.fillRect(barX + px, barY, 1, barH);
                 }
@@ -429,26 +429,6 @@ const ExportAnimation = {
             const lblW = ctx.measureText(legendLabel).width;
             ctx.fillText(legendLabel, barX + (barW - lblW) / 2, barY + barH + 12);
         }
-    },
-
-    /**
-     * Interpolate color from scale stops at position t (0-1).
-     */
-    _interpolateStops(stops, t) {
-        t = Math.max(0, Math.min(1, t));
-        let i = 0;
-        while (i < stops.length - 1 && stops[i + 1][0] < t) i++;
-        if (i >= stops.length - 1) return stops[stops.length - 1][1];
-
-        const [t0, c0] = stops[i];
-        const [t1, c1] = stops[i + 1];
-        const f = (t - t0) / (t1 - t0 || 1);
-
-        return [
-            Math.round(c0[0] + (c1[0] - c0[0]) * f),
-            Math.round(c0[1] + (c1[1] - c0[1]) * f),
-            Math.round(c0[2] + (c1[2] - c0[2]) * f),
-        ];
     },
 
     // ------------------------------------------------------------------
