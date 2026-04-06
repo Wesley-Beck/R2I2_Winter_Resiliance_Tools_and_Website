@@ -87,6 +87,15 @@ async def root():
     return RedirectResponse(url="/explorer/index.html")
 
 
+@app.head("/api/points")
+async def head_points():
+    """HEAD probe for API detection — returns 200 with no body."""
+    points_file = DATA_DIR / "points_index.csv"
+    if not points_file.exists():
+        raise HTTPException(404, "Point index not found.")
+    return Response(status_code=200)
+
+
 @app.get("/api/points")
 async def get_points():
     """Return point index as JSON array."""
