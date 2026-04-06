@@ -20,13 +20,7 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# WUP bounding box for NIFC queries
-WUP_BBOX = {
-    "xmin": -90.5,
-    "ymin": 45.9,
-    "xmax": -87.4,
-    "ymax": 48.3,
-}
+from aorc_tools.analysis import WUP_BBOX
 
 NIFC_URL = (
     "https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/"
@@ -222,12 +216,12 @@ def roc_analysis(fdi_values, fire_binary, n_thresholds=200):
     n_pos = fire.sum()
     n_neg = (~fire).sum()
 
-    for i, t in enumerate(thresholds):
-        predicted = fdi >= t
-        tp = (predicted & fire).sum()
-        fp = (predicted & ~fire).sum()
-        tpr[i] = tp / n_pos
-        fpr[i] = fp / n_neg
+    # Vectorized: broadcast (n_thresholds, n_samples) comparison
+    predicted = fdi[np.newaxis, :] >= thresholds[:, np.newaxis]
+    tp = (predicted & fire[np.newaxis, :]).sum(axis=1)
+    fp = (predicted & ~fire[np.newaxis, :]).sum(axis=1)
+    tpr = tp / n_pos
+    fpr = fp / n_neg
 
     # Sort by FPR for proper ROC curve
     order = np.argsort(fpr)
@@ -269,23 +263,25 @@ def hit_rate_analysis(fdi_values, fire_binary, thresholds):
     fdi = fdi_values[valid]
     fire = np.asarray(fire_binary)[valid].astype(bool)
 
-    results = []
     n_pos = fire.sum()
     n_neg = (~fire).sum()
+    thresholds = np.asarray(thresholds, dtype=np.float64)
 
-    for t in thresholds:
-        predicted = fdi >= t
-        tp = (predicted & fire).sum()
-        fp = (predicted & ~fire).sum()
-        fn = (~predicted & fire).sum()
+    # Vectorized broadcast
+    predicted = fdi[np.newaxis, :] >= thresholds[:, np.newaxis]
+    tp = (predicted & fire[np.newaxis, :]).sum(axis=1).astype(np.float64)
+    fp = (predicted & ~fire[np.newaxis, :]).sum(axis=1).astype(np.float64)
+    fn = (~predicted & fire[np.newaxis, :]).sum(axis=1).astype(np.float64)
 
-        hit_rate = tp / n_pos if n_pos > 0 else 0.0
-        far = fp / n_neg if n_neg > 0 else 0.0
-        precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-        f1 = 2 * tp / (2 * tp + fp + fn) if (2 * tp + fp + fn) > 0 else 0.0
+    results = []
+    for i in range(len(thresholds)):
+        hit_rate = tp[i] / n_pos if n_pos > 0 else 0.0
+        far = fp[i] / n_neg if n_neg > 0 else 0.0
+        precision = tp[i] / (tp[i] + fp[i]) if (tp[i] + fp[i]) > 0 else 0.0
+        f1 = 2 * tp[i] / (2 * tp[i] + fp[i] + fn[i]) if (2 * tp[i] + fp[i] + fn[i]) > 0 else 0.0
 
         results.append({
-            "threshold": float(t),
+            "threshold": float(thresholds[i]),
             "hit_rate": float(hit_rate),
             "false_alarm_rate": float(far),
             "precision": float(precision),

@@ -13,6 +13,7 @@ Methods:
 """
 
 import numpy as np
+from scipy.stats import rankdata
 
 
 def rank_correlation(x, y):
@@ -31,8 +32,8 @@ def rank_correlation(x, y):
     if len(x_v) < 3:
         return np.nan
 
-    rx = _rank(x_v)
-    ry = _rank(y_v)
+    rx = rankdata(x_v)
+    ry = rankdata(y_v)
 
     d = rx - ry
     n = len(rx)
@@ -300,22 +301,3 @@ def cluster_fdis(similarity_matrix, names, n_clusters=3):
         renumbered[new_id] = members
 
     return renumbered, merge_history
-
-
-# -- Internal helpers --
-
-def _rank(x):
-    """Compute ranks (average rank for ties)."""
-    n = len(x)
-    order = np.argsort(x)
-    ranks = np.empty(n, dtype=np.float64)
-    i = 0
-    while i < n:
-        j = i
-        while j < n - 1 and x[order[j + 1]] == x[order[j]]:
-            j += 1
-        avg_rank = (i + j) / 2.0 + 1.0
-        for k in range(i, j + 1):
-            ranks[order[k]] = avg_rank
-        i = j + 1
-    return ranks

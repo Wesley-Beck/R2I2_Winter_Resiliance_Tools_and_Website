@@ -176,6 +176,9 @@ const ExportAnimation = {
             this._exporting = false;
             this._clearProgressionLayers();
             this._progressionFires = null;
+            this._mapContainer = null;
+            this._tilePane = null;
+            this._cachedSvgImg = null;
             cancelBtn.style.display = "none";
             exportBtn.disabled = false;
             progressBar.style.display = "block";
@@ -290,7 +293,10 @@ const ExportAnimation = {
      * (canvas renderer + tiles) to an offscreen canvas.
      */
     async _captureMapCanvas(includeOverlay) {
-        const mapContainer = document.getElementById("map");
+        if (!this._mapContainer) {
+            this._mapContainer = document.getElementById("map");
+        }
+        const mapContainer = this._mapContainer;
         const rect = mapContainer.getBoundingClientRect();
         const width = rect.width;
         const height = rect.height;
@@ -307,60 +313,54 @@ const ExportAnimation = {
         const ctx = this._ctx;
         const canvas = this._canvas;
         ctx.scale(dpr, dpr);
-
-        // Clear
         ctx.clearRect(0, 0, width, height);
 
-        // 1. Draw basemap tiles
-        const tilePane = mapContainer.querySelector(".leaflet-tile-pane");
-        if (tilePane) {
-            const tiles = tilePane.querySelectorAll("img.leaflet-tile");
+        // Cache tile pane reference (tiles themselves change position, but pane is stable)
+        if (!this._tilePane) {
+            this._tilePane = mapContainer.querySelector(".leaflet-tile-pane");
+        }
+        if (this._tilePane) {
+            const tiles = this._tilePane.querySelectorAll("img.leaflet-tile");
             for (const tile of tiles) {
                 try {
                     const tileRect = tile.getBoundingClientRect();
-                    const x = tileRect.left - rect.left;
-                    const y = tileRect.top - rect.top;
-                    ctx.drawImage(tile, x, y, tileRect.width, tileRect.height);
-                } catch (e) {
-                    // CORS tile — skip
-                }
+                    ctx.drawImage(tile, tileRect.left - rect.left, tileRect.top - rect.top,
+                                  tileRect.width, tileRect.height);
+                } catch (e) { /* CORS tile */ }
             }
         }
 
-        // 2. Draw Leaflet canvas renderer (data points)
-        const canvasPane = mapContainer.querySelector(".leaflet-canvas-icon-overlay, canvas.leaflet-zoom-animated");
-        // Try finding the Leaflet renderer canvas
+        // Draw Leaflet canvas renderer (data points)
         const allCanvases = mapContainer.querySelectorAll("canvas");
         for (const c of allCanvases) {
             try {
                 const cr = c.getBoundingClientRect();
-                const x = cr.left - rect.left;
-                const y = cr.top - rect.top;
-                ctx.drawImage(c, x, y, cr.width, cr.height);
-            } catch (e) {
-                // tainted canvas
-            }
+                ctx.drawImage(c, cr.left - rect.left, cr.top - rect.top, cr.width, cr.height);
+            } catch (e) { /* tainted canvas */ }
         }
 
-        // 3. Draw SVG overlays (fire perimeters, if any)
+        // Draw SVG overlays — cache serialized SVG images when content is static
         if (includeOverlay) {
             const svgPanes = mapContainer.querySelectorAll(".leaflet-overlay-pane svg");
+            const svgChanged = this._progressionFires && this._progressionFires.length > 0;
+
             for (const svg of svgPanes) {
                 try {
-                    const svgData = new XMLSerializer().serializeToString(svg);
-                    const svgBlob = new Blob([svgData], { type: "image/svg+xml;charset=utf-8" });
-                    const url = URL.createObjectURL(svgBlob);
-                    const img = await this._loadImage(url);
+                    // Re-serialize only if fire progression is active (SVG changes per frame)
+                    if (svgChanged || !this._cachedSvgImg) {
+                        const svgData = new XMLSerializer().serializeToString(svg);
+                        const svgBlob = new Blob([svgData], { type: "image/svg+xml;charset=utf-8" });
+                        const url = URL.createObjectURL(svgBlob);
+                        this._cachedSvgImg = await this._loadImage(url);
+                        URL.revokeObjectURL(url);
+                    }
                     const sr = svg.getBoundingClientRect();
-                    ctx.drawImage(img, sr.left - rect.left, sr.top - rect.top, sr.width, sr.height);
-                    URL.revokeObjectURL(url);
-                } catch (e) {
-                    // SVG render failed
-                }
+                    ctx.drawImage(this._cachedSvgImg, sr.left - rect.left, sr.top - rect.top,
+                                  sr.width, sr.height);
+                } catch (e) { /* SVG render failed */ }
             }
         }
 
-        // 4. Draw timestamp + legend overlay
         this._drawOverlayText(ctx, width, height);
 
         // Reset scale for next capture
@@ -493,8 +493,8 @@ const ExportAnimation = {
         const delay = parseInt(document.getElementById("export-gif-delay")?.value) || 200;
 
         const gif = new GIF({
-            workers: 2,
-            quality: 10,
+            workers: Math.min(navigator.hardwareConcurrency || 4, 8),
+            quality: 15,
             width: this._canvas.width / (window.devicePixelRatio || 1),
             height: this._canvas.height / (window.devicePixelRatio || 1),
             workerScript: "https://unpkg.com/gif.js@0.2.0/dist/gif.worker.js",

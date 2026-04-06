@@ -520,9 +520,8 @@ def generate_all_figures(data_store, output_dir, fdis=None, months=None):
         # Auto-detect from first available month
         y, m = months[0]
         all_vars = data_store.get_variables(y, m)
-        fdi_vars = [v for v in all_vars if v in
-                    {"FWI", "ISI", "BUI", "FFMC", "DMC", "DC",
-                     "ERC", "BI", "SC", "FPI", "FM1", "FM10"}]
+        from aorc_tools.analysis import ALL_FDI_VARS
+        fdi_vars = [v for v in all_vars if v in ALL_FDI_VARS]
         fdis = fdi_vars if fdi_vars else all_vars[:5]
 
     logger.info("Generating figures for %d FDIs across %d months",

@@ -28,17 +28,36 @@ def smooth_timeseries(values, window=7, method="mean"):
     Returns:
         smoothed: same-length array with NaN-aware rolling statistic
     """
-    n = len(values)
-    smoothed = np.empty(n, dtype=np.float64)
-    half = window // 2
-    func = np.nanmean if method == "mean" else np.nanmedian
+    arr = np.asarray(values, dtype=np.float64)
+    n = len(arr)
 
-    for i in range(n):
-        lo = max(0, i - half)
-        hi = min(n, i + half + 1)
-        smoothed[i] = func(values[lo:hi])
+    if method == "mean":
+        # Vectorized NaN-aware rolling mean using cumsum trick
+        valid = ~np.isnan(arr)
+        filled = np.where(valid, arr, 0.0)
+        half = window // 2
 
-    return smoothed
+        cumsum = np.concatenate(([0.0], np.cumsum(filled)))
+        count = np.concatenate(([0], np.cumsum(valid.astype(np.int64))))
+
+        lo = np.clip(np.arange(n) - half, 0, n)
+        hi = np.clip(np.arange(n) + half + 1, 0, n)
+
+        sums = cumsum[hi] - cumsum[lo]
+        counts = count[hi] - count[lo]
+
+        with np.errstate(invalid="ignore"):
+            smoothed = np.where(counts > 0, sums / counts, np.nan)
+        return smoothed
+    else:
+        # Median requires per-element computation (no cumsum trick)
+        smoothed = np.empty(n, dtype=np.float64)
+        half = window // 2
+        for i in range(n):
+            lo = max(0, i - half)
+            hi = min(n, i + half + 1)
+            smoothed[i] = np.nanmedian(arr[lo:hi])
+        return smoothed
 
 
 def detect_season(values, threshold, min_above_days=5, min_below_days=7,
@@ -75,7 +94,6 @@ def detect_season(values, threshold, min_above_days=5, min_below_days=7,
     smoothed = smooth_timeseries(values, smooth_window, smooth_method)
     above = smoothed >= threshold
 
-    # Extract raw runs of consecutive True values
     raw_runs = _extract_runs(above)
 
     if not raw_runs:
@@ -88,10 +106,7 @@ def detect_season(values, threshold, min_above_days=5, min_below_days=7,
             "runs": [],
         }
 
-    # Merge runs separated by gaps < min_below_days
     merged = _merge_runs(raw_runs, min_gap=min_below_days)
-
-    # Filter to runs >= min_above_days
     qualifying = [(s, e) for s, e in merged if (e - s) >= min_above_days]
 
     if not qualifying:

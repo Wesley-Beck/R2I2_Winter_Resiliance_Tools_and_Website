@@ -610,12 +610,11 @@ def analyze_correlation(data_dir, figures_dir, year_start, year_end, fdis):
     else:
         y, m = available[0]
         all_vars = store.get_variables(y, m)
-        fdi_list = [v for v in all_vars if v in
-                    {"FWI", "ISI", "BUI", "ERC", "BI", "SC", "FPI"}]
+        from aorc_tools.analysis import CORE_FDI_VARS
+        fdi_list = [v for v in all_vars if v in CORE_FDI_VARS]
 
     click.echo(f"Analyzing FDIs: {', '.join(fdi_list)}")
 
-    # Load data and build fire binary
     import numpy as np
     fdi_data = {}
     dates_all = None
@@ -698,9 +697,8 @@ def analyze_monte_carlo(data_dir, figures_dir, n_samples, fdis):
     else:
         y, m = available[0]
         all_vars = store.get_variables(y, m)
-        fdi_list = [v for v in all_vars if v in
-                    {"FWI", "ISI", "BUI", "FFMC", "DMC", "DC",
-                     "ERC", "BI", "SC", "FPI"}]
+        from aorc_tools.analysis import ALL_FDI_VARS
+        fdi_list = [v for v in all_vars if v in ALL_FDI_VARS]
 
     click.echo(f"FDIs: {', '.join(fdi_list)}")
     click.echo(f"Monte Carlo samples: {n_samples}")

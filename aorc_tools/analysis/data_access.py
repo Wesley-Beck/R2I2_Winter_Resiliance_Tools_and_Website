@@ -7,7 +7,7 @@ Provides a clean API for loading multi-month time series across the
 
 import logging
 import sqlite3
-from datetime import datetime
+from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
@@ -25,8 +25,9 @@ class AnalysisDataStore:
 
     def __init__(self, output_base="data/output"):
         self.output_base = Path(output_base)
-        self._points = None
         self._points_df = None
+        self._lats = None
+        self._lons = None
 
     @property
     def points(self):
@@ -34,7 +35,8 @@ class AnalysisDataStore:
         if self._points_df is None:
             path = self.output_base / "points_index.csv"
             self._points_df = pd.read_csv(path)
-            self._points = self._points_df[["point_id", "latitude", "longitude"]].values
+            self._lats = self._points_df["latitude"].values
+            self._lons = self._points_df["longitude"].values
         return self._points_df
 
     @property
@@ -43,11 +45,15 @@ class AnalysisDataStore:
 
     @property
     def lats(self):
-        return self.points["latitude"].values
+        if self._lats is None:
+            self.points  # trigger load
+        return self._lats
 
     @property
     def lons(self):
-        return self.points["longitude"].values
+        if self._lons is None:
+            self.points  # trigger load
+        return self._lons
 
     def available_months(self):
         """Return list of (year, month) tuples with data."""
@@ -110,47 +116,33 @@ class AnalysisDataStore:
 
         return timestamps, data
 
-    def load_daily_max(self, year, month, variable):
-        """Load daily maximum values (reduces 744 hours → 31 days).
+    def _load_daily_agg(self, year, month, variable, agg_func):
+        """Load daily aggregated values (shared logic for max/mean).
 
-        Returns:
-            days: list of day numbers (1-31)
-            data: np.ndarray of shape (n_days, n_points), float32
+        Args:
+            agg_func: np.nanmax or np.nanmean
         """
         timestamps, hourly = self.load_month(year, month, variable)
 
-        # Group by day
-        from collections import defaultdict
         day_hours = defaultdict(list)
         for i, ts in enumerate(timestamps):
             day = int(ts.split("-")[2].split(" ")[0])
             day_hours[day].append(i)
 
         days = sorted(day_hours.keys())
-        daily_max = np.empty((len(days), hourly.shape[1]), dtype=np.float32)
+        result = np.empty((len(days), hourly.shape[1]), dtype=np.float32)
         for d_idx, day in enumerate(days):
-            indices = day_hours[day]
-            daily_max[d_idx] = np.nanmax(hourly[indices], axis=0)
+            result[d_idx] = agg_func(hourly[day_hours[day]], axis=0)
 
-        return days, daily_max
+        return days, result
+
+    def load_daily_max(self, year, month, variable):
+        """Load daily maximum values (reduces 744 hours to 31 days)."""
+        return self._load_daily_agg(year, month, variable, np.nanmax)
 
     def load_daily_mean(self, year, month, variable):
         """Load daily mean values."""
-        timestamps, hourly = self.load_month(year, month, variable)
-
-        from collections import defaultdict
-        day_hours = defaultdict(list)
-        for i, ts in enumerate(timestamps):
-            day = int(ts.split("-")[2].split(" ")[0])
-            day_hours[day].append(i)
-
-        days = sorted(day_hours.keys())
-        daily_mean = np.empty((len(days), hourly.shape[1]), dtype=np.float32)
-        for d_idx, day in enumerate(days):
-            indices = day_hours[day]
-            daily_mean[d_idx] = np.nanmean(hourly[indices], axis=0)
-
-        return days, daily_mean
+        return self._load_daily_agg(year, month, variable, np.nanmean)
 
     def load_multi_month(self, months, variable, aggregation="daily_max"):
         """Load multiple months and concatenate.
@@ -172,11 +164,9 @@ class AnalysisDataStore:
                 if aggregation == "hourly":
                     ts, d = self.load_month(year, month, variable)
                     all_dates.extend(ts)
-                elif aggregation == "daily_max":
-                    days, d = self.load_daily_max(year, month, variable)
-                    all_dates.extend([f"{year}-{month:02d}-{day:02d}" for day in days])
-                elif aggregation == "daily_mean":
-                    days, d = self.load_daily_mean(year, month, variable)
+                else:
+                    agg_func = self.load_daily_max if aggregation == "daily_max" else self.load_daily_mean
+                    days, d = agg_func(year, month, variable)
                     all_dates.extend([f"{year}-{month:02d}-{day:02d}" for day in days])
                 all_data.append(d)
             except (FileNotFoundError, ValueError) as e:
@@ -188,10 +178,7 @@ class AnalysisDataStore:
         return all_dates, np.concatenate(all_data, axis=0)
 
     def load_spatial_mean_timeseries(self, months, variable, aggregation="daily_max"):
-        """Load time series of spatially-averaged values (single value per timestep).
-
-        Useful for seasonality analysis.
-        """
+        """Load time series of spatially-averaged values (single value per timestep)."""
         dates, data = self.load_multi_month(months, variable, aggregation)
         spatial_mean = np.nanmean(data, axis=1)
         return dates, spatial_mean
