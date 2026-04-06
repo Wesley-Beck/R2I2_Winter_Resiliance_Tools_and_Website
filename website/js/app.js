@@ -312,6 +312,7 @@ const App = {
         document.getElementById("status-text").textContent = "Initializing map...";
         MapLayer.initMap();
         UIControls.init();
+        ExportAnimation.init();
         this._initSourceSelectors();
         this._updateInfoCard();
         this._updateFdiAvailability();

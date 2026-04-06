@@ -664,6 +664,92 @@ select.layer-select option:disabled {
     color: #c8a880;
 }
 
+/* --- Export / Animation Panel --- */
+
+#export-panel .input-group {
+    margin-bottom: 6px;
+}
+
+#export-panel input[type="date"] {
+    background: #2a1a0e;
+    color: #e8d5c4;
+    border: 1px solid #5c3a20;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.82rem;
+    width: 100%;
+}
+
+#export-panel input[type="number"] {
+    background: #2a1a0e;
+    color: #e8d5c4;
+    border: 1px solid #5c3a20;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.82rem;
+    width: 80px;
+}
+
+.btn-export {
+    flex: 1;
+    padding: 6px 16px;
+    background: #4a7a3a;
+    color: #e8d5c4;
+    border: 1px solid #6a9a4a;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.85rem;
+    transition: background 0.15s;
+}
+
+.btn-export:hover {
+    background: #5a9a4a;
+}
+
+.btn-export:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.btn-cancel {
+    padding: 6px 12px;
+    background: #7a3a2a;
+    color: #e8d5c4;
+    border: 1px solid #9a4a3a;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.82rem;
+}
+
+.btn-cancel:hover {
+    background: #9a4a3a;
+}
+
+#export-progress {
+    appearance: none;
+    height: 6px;
+    border-radius: 3px;
+    overflow: hidden;
+    border: none;
+    background: #2a1a0e;
+}
+
+#export-progress::-webkit-progress-bar {
+    background: #2a1a0e;
+    border-radius: 3px;
+}
+
+#export-progress::-webkit-progress-value {
+    background: #c87533;
+    border-radius: 3px;
+}
+
+#export-progress::-moz-progress-bar {
+    background: #c87533;
+    border-radius: 3px;
+}
+
 /* --- Responsive --- */
 
 @media (max-width: 768px) {

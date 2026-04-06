@@ -185,6 +185,11 @@ const UIControls = {
         this._updateRangeDisplay();
         this._buildPlaybackFrames();
         this._displayCurrentTimestamp();
+
+        // Sync export date range with calendar selection
+        if (typeof ExportAnimation !== "undefined") {
+            ExportAnimation._syncFromUI();
+        }
     },
 
     _updateRangeDisplay() {
