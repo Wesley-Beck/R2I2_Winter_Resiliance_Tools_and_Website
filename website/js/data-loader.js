@@ -149,7 +149,8 @@ const DataLoader = {
                 }
             } catch (e) {
                 if (e.message === "Request superseded") throw e;
-                // API failed, fall through to static files
+                console.error("API data load/parse error:", e);
+                // Fall through to static files
             }
         }
 
@@ -167,7 +168,8 @@ const DataLoader = {
             }
         } catch (e) {
             if (e.message === "Request superseded") throw e;
-            // Binary not available, fall back to CSV
+            console.warn("Binary file load/parse error:", e);
+            // Fall back to CSV
         }
 
         // Fall back to CSV
@@ -195,9 +197,12 @@ const DataLoader = {
         offset += tsBlockLen;
 
         // Read float32 arrays for each hour
+        // Note: cannot use Float32Array(buffer, offset) directly because
+        // offset may not be 4-byte aligned after the variable-length timestamp block.
         const data = new Array(nHours);
         for (let h = 0; h < nHours; h++) {
-            data[h] = new Float32Array(buffer, offset, nPoints);
+            // Copy into a new aligned Float32Array
+            data[h] = new Float32Array(buffer.slice(offset, offset + nPoints * 4));
             offset += nPoints * 4;
         }
 
