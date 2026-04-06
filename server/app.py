@@ -23,9 +23,12 @@ Usage:
 """
 
 import json
+import logging
 import sqlite3
 import struct
 from pathlib import Path
+
+logger = logging.getLogger("uvicorn.error")
 from typing import Optional
 
 import numpy as np
@@ -155,9 +158,10 @@ async def get_monthly_data(variable: str, year: int, month: int):
     timestamps = [r[0] for r in rows]
     ts_block = "\n".join(timestamps).encode("utf-8")
 
-    # Pad ts_block to 4-byte alignment so Float32Array views work directly
+    # Pad ts_block to 4-byte alignment so Float32Array views work directly.
+    # Use \n padding so split("\n") just produces extra empty strings (harmless).
     padding = (4 - len(ts_block) % 4) % 4
-    ts_block_padded = ts_block + b"\x00" * padding
+    ts_block_padded = ts_block + b"\n" * padding
 
     # Pre-allocate full buffer instead of O(n²) bytearray concatenation
     header = struct.pack("<III", n_points, n_hours, len(ts_block_padded))
@@ -165,10 +169,20 @@ async def get_monthly_data(variable: str, year: int, month: int):
     parts.extend(blob for _, blob in rows)
     content = b"".join(parts)
 
+    total_mb = len(content) / 1048576
+    data_offset = 12 + len(ts_block_padded)
+    logger.info(
+        "Built %s %d-%02d: %d pts × %d hrs, ts_block=%d (padded=%d), "
+        "data_offset=%d (aligned=%s), total=%.1f MB",
+        variable, year, month, n_points, n_hours,
+        len(ts_block), len(ts_block_padded),
+        data_offset, data_offset % 4 == 0, total_mb,
+    )
+
     return Response(
         content=content,
         media_type="application/octet-stream",
-        headers={"Cache-Control": "public, max-age=3600"},
+        headers={"Cache-Control": "no-cache"},
     )
 
 
