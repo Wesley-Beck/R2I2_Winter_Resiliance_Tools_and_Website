@@ -315,6 +315,19 @@ async def get_benchmark():
 # Static file serving (website frontend)
 # =====================================================================
 
+
+@app.middleware("http")
+async def no_cache_dev_assets(request, call_next):
+    """Disable browser caching for JS/CSS during development."""
+    response = await call_next(request)
+    path = request.url.path
+    if path.endswith((".js", ".css", ".html")):
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
+
 # Mount the website directory for static file serving
 # This replaces the need for a separate HTTP server
 app.mount("/explorer", StaticFiles(directory=str(WEBSITE_DIR), html=True), name="explorer")
