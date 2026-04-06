@@ -155,15 +155,18 @@ async def get_monthly_data(variable: str, year: int, month: int):
     timestamps = [r[0] for r in rows]
     ts_block = "\n".join(timestamps).encode("utf-8")
 
-    buf = bytearray()
-    buf += struct.pack("<II", n_points, n_hours)
-    buf += struct.pack("<I", len(ts_block))
-    buf += ts_block
-    for _, blob in rows:
-        buf += blob
+    # Pad ts_block to 4-byte alignment so Float32Array views work directly
+    padding = (4 - len(ts_block) % 4) % 4
+    ts_block_padded = ts_block + b"\x00" * padding
+
+    # Pre-allocate full buffer instead of O(n²) bytearray concatenation
+    header = struct.pack("<III", n_points, n_hours, len(ts_block_padded))
+    parts = [header, ts_block_padded]
+    parts.extend(blob for _, blob in rows)
+    content = b"".join(parts)
 
     return Response(
-        content=bytes(buf),
+        content=content,
         media_type="application/octet-stream",
         headers={"Cache-Control": "public, max-age=3600"},
     )

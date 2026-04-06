@@ -148,6 +148,9 @@ class SQLiteStorage:
             n_hours = len(rows)
             timestamps = [r[0] for r in rows]
             ts_block = "\n".join(timestamps).encode("utf-8")
+            # Pad to 4-byte alignment so browser Float32Array views work
+            padding = (4 - len(ts_block) % 4) % 4
+            ts_block += b"\x00" * padding
 
             bin_path = web_dir / f"{variable}.bin"
             with open(bin_path, "wb", buffering=1048576) as f:

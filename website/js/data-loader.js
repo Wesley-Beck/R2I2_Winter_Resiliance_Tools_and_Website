@@ -190,9 +190,9 @@ const DataLoader = {
         const nHours = view.getUint32(offset, true); offset += 4;
         const tsBlockLen = view.getUint32(offset, true); offset += 4;
 
-        // Decode timestamp strings
+        // Decode timestamp strings (block may be null-padded to 4-byte alignment)
         const tsBytes = new Uint8Array(buffer, offset, tsBlockLen);
-        const tsText = new TextDecoder().decode(tsBytes);
+        const tsText = new TextDecoder().decode(tsBytes).replace(/\0+$/, "");
         const timestamps = tsText.split("\n");
         offset += tsBlockLen;
 
@@ -358,8 +358,20 @@ const DataLoader = {
         const monthStr = String(month).padStart(2, "0");
         const parts = layerPath.split("/");
         const variable = parts.length > 1 ? parts[1] : parts[0];
-        const binUrl = `${this.basePath}/${year}/${monthStr}/web/${variable}.bin`;
 
+        // Check API first (covers SQLite data even without .bin files)
+        if (this.apiBase) {
+            try {
+                const resp = await fetch(`${this.apiBase}/variables/${year}/${month}`);
+                if (resp.ok) {
+                    const data = await resp.json();
+                    return data.variables && data.variables.includes(variable) ? "full" : "none";
+                }
+            } catch { /* fall through */ }
+        }
+
+        // Fall back to static .bin check
+        const binUrl = `${this.basePath}/${year}/${monthStr}/web/${variable}.bin`;
         try {
             const resp = await fetch(binUrl, { method: "HEAD" });
             return resp.ok ? "full" : "none";
