@@ -483,6 +483,492 @@ def plot_lowest_risk_map(lats, lons, safe_mask, point_means,
     return fig, ax
 
 
+def plot_severity_distribution(yearly_dist, variable, figsize=(12, 6),
+                               save_path=None):
+    """Stacked bar chart showing severity level distribution per year.
+
+    Args:
+        yearly_dist: dict mapping year → {level_name: fraction}
+        variable: FDI variable name for labeling
+        figsize: figure size
+        save_path: output path
+
+    Returns:
+        fig, ax
+    """
+    import matplotlib.pyplot as plt
+    _apply_style()
+
+    severity_colors = {
+        "Low": "#2ca02c",
+        "Moderate": "#ffdd57",
+        "High": "#ff7f0e",
+        "Very High": "#d62728",
+        "Extreme": "#7b2d26",
+    }
+
+    fig, ax = plt.subplots(1, 1, figsize=figsize)
+
+    years = sorted(yearly_dist.keys())
+    levels = ["Low", "Moderate", "High", "Very High", "Extreme"]
+    # Filter to levels that actually appear in the data
+    levels = [lv for lv in levels if any(lv in yearly_dist[y] for y in years)]
+
+    bottoms = np.zeros(len(years))
+    for level in levels:
+        fractions = [yearly_dist[y].get(level, 0.0) for y in years]
+        ax.bar(years, fractions, bottom=bottoms,
+               color=severity_colors.get(level, "#999999"),
+               label=level, edgecolor="white", linewidth=0.3)
+        bottoms += np.array(fractions)
+
+    # Trend line for "High" and above combined
+    high_levels = {"High", "Very High", "Extreme"}
+    high_combined = []
+    for y in years:
+        total = sum(yearly_dist[y].get(lv, 0.0) for lv in high_levels)
+        high_combined.append(total)
+
+    if len(years) >= 3:
+        z = np.polyfit(years, high_combined, 1)
+        trend = np.polyval(z, years)
+        ax.plot(years, trend, "k--", linewidth=1.5,
+                label=f"High+ trend: {z[0]:+.4f}/yr")
+
+    ax.set_xlabel("Year")
+    ax.set_ylabel("Fraction")
+    ax.set_ylim(0, 1)
+    ax.set_title(f"{variable} Severity Distribution by Year")
+    ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1))
+    fig.tight_layout()
+
+    if save_path:
+        fig.savefig(save_path)
+        logger.info("Saved: %s", save_path)
+
+    return fig, ax
+
+
+def plot_extreme_event_timeline(events, variable, figsize=(14, 5),
+                                save_path=None):
+    """Timeline of extreme events as horizontal bars.
+
+    Args:
+        events: list of dicts with keys: start_date, end_date, duration,
+                peak_value, spatial_extent
+        variable: FDI variable name for labeling
+        figsize: figure size
+        save_path: output path
+
+    Returns:
+        fig, ax
+    """
+    import matplotlib.pyplot as plt
+    import matplotlib.dates as mdates
+    from datetime import datetime
+    _apply_style()
+
+    fig, ax = plt.subplots(1, 1, figsize=figsize)
+
+    if not events:
+        ax.text(0.5, 0.5, "No extreme events detected",
+                transform=ax.transAxes, ha="center", va="center")
+        ax.set_title(f"{variable} Extreme Event Timeline")
+        if save_path:
+            fig.savefig(save_path)
+            logger.info("Saved: %s", save_path)
+        return fig, ax
+
+    # Parse dates and extract peak values for color mapping
+    peak_values = [e["peak_value"] for e in events]
+    vmin, vmax = min(peak_values), max(peak_values)
+
+    cmap = plt.cm.YlOrRd
+    norm = plt.Normalize(vmin=vmin, vmax=vmax)
+
+    for i, event in enumerate(events):
+        start = event["start_date"]
+        if isinstance(start, str):
+            start = datetime.strptime(start[:10], "%Y-%m-%d")
+        end = event["end_date"]
+        if isinstance(end, str):
+            end = datetime.strptime(end[:10], "%Y-%m-%d")
+
+        color = cmap(norm(event["peak_value"]))
+        ax.barh(i, (end - start).days or 1, left=mdates.date2num(start),
+                height=0.6, color=color, edgecolor="black", linewidth=0.3)
+
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
+    ax.xaxis.set_major_locator(mdates.YearLocator())
+    fig.autofmt_xdate()
+
+    ax.set_ylabel("Event #")
+    ax.set_xlabel("Date")
+    ax.set_title(f"{variable} Extreme Event Timeline")
+    ax.set_yticks(range(len(events)))
+    ax.set_yticklabels([f"E{i+1}" for i in range(len(events))])
+
+    sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+    sm.set_array([])
+    cbar = fig.colorbar(sm, ax=ax, shrink=0.8, pad=0.02)
+    cbar.set_label(f"Peak {variable}")
+
+    fig.tight_layout()
+
+    if save_path:
+        fig.savefig(save_path)
+        logger.info("Saved: %s", save_path)
+
+    return fig, ax
+
+
+def plot_return_periods(return_periods, return_levels, annual_maxima,
+                        variable, gev_params=None, figsize=(8, 6),
+                        save_path=None):
+    """Return period plot on Gumbel paper.
+
+    Args:
+        return_periods: array of return periods (years)
+        return_levels: array of fitted return levels
+        annual_maxima: array of observed annual maxima
+        variable: FDI variable name for labeling
+        gev_params: optional dict with 'shape', 'loc', 'scale' for annotation
+        figsize: figure size
+        save_path: output path
+
+    Returns:
+        fig, ax
+    """
+    import matplotlib.pyplot as plt
+    _apply_style()
+
+    fig, ax = plt.subplots(1, 1, figsize=figsize)
+
+    # Plot fitted curve
+    ax.plot(return_periods, return_levels, "b-", linewidth=2,
+            label="GEV fit")
+
+    # Confidence intervals (approximate using +/- 10% for visual)
+    if len(return_levels) > 0:
+        upper = return_levels * 1.1
+        lower = return_levels * 0.9
+        ax.fill_between(return_periods, lower, upper, alpha=0.2, color="blue",
+                        label="90% CI (approx)")
+
+    # Plot observed points using Weibull plotting position
+    n = len(annual_maxima)
+    if n > 0:
+        sorted_maxima = np.sort(annual_maxima)[::-1]
+        empirical_rp = np.array([(n + 1) / i for i in range(1, n + 1)])
+        ax.scatter(empirical_rp, sorted_maxima, c="red", s=30, zorder=5,
+                   label="Observed annual maxima")
+
+    ax.set_xscale("log")
+    ax.set_xlabel("Return Period (years)")
+    ax.set_ylabel(f"Return Level ({variable})")
+    ax.set_title(f"{variable} Return Period Analysis")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    if gev_params is not None:
+        text = (f"GEV params:\n"
+                f"  shape = {gev_params.get('shape', 0):.3f}\n"
+                f"  loc   = {gev_params.get('loc', 0):.1f}\n"
+                f"  scale = {gev_params.get('scale', 0):.1f}")
+        ax.text(0.02, 0.98, text, transform=ax.transAxes, fontsize=7,
+                va="top", ha="left",
+                bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5))
+
+    fig.tight_layout()
+
+    if save_path:
+        fig.savefig(save_path)
+        logger.info("Saved: %s", save_path)
+
+    return fig, ax
+
+
+def plot_all_indices_seasonal_overlay(seasonal_profiles, figsize=(14, 6),
+                                      save_path=None):
+    """Overlay ALL wildfire indices on one plot by day-of-year.
+
+    This is the key comparison figure showing when each index peaks
+    and how they compare seasonally.
+
+    Args:
+        seasonal_profiles: dict mapping variable_name → 366-element
+                          smoothed profile array
+        figsize: figure size
+        save_path: output path
+
+    Returns:
+        fig, ax
+    """
+    import matplotlib.pyplot as plt
+    _apply_style()
+
+    fig, ax = plt.subplots(1, 1, figsize=figsize)
+
+    x = np.arange(1, 367)
+    for name, profile in sorted(seasonal_profiles.items()):
+        color = FDI_COLORS.get(name, None)
+        # Normalize each profile to 0-1 for comparison
+        pmin, pmax = np.nanmin(profile), np.nanmax(profile)
+        if pmax > pmin:
+            normalized = (profile - pmin) / (pmax - pmin)
+        else:
+            normalized = profile
+        ax.plot(x, normalized, color=color, linewidth=1.8, label=name,
+                alpha=0.85)
+
+    ax.set_xlabel("Day of Year")
+    ax.set_ylabel("Normalized Index Value (0-1)")
+    ax.set_title("Seasonal Overlay of All Fire Danger Indices")
+    ax.set_xlim(1, 366)
+    ax.set_ylim(0, 1.05)
+
+    # Month labels on x-axis
+    month_starts = [1, 32, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335]
+    month_names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    ax.set_xticks(month_starts)
+    ax.set_xticklabels(month_names)
+
+    ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1), fontsize=8)
+    ax.grid(True, alpha=0.2)
+    fig.tight_layout()
+
+    if save_path:
+        fig.savefig(save_path)
+        logger.info("Saved: %s", save_path)
+
+    return fig, ax
+
+
+def plot_intensity_duration(idf_results, variable, figsize=(10, 6),
+                            save_path=None):
+    """Intensity-Duration-Frequency curves.
+
+    Args:
+        idf_results: dict mapping duration_days → annual_maxima array
+        variable: FDI variable name for labeling
+        figsize: figure size
+        save_path: output path
+
+    Returns:
+        fig, ax
+    """
+    import matplotlib.pyplot as plt
+    _apply_style()
+
+    fig, ax = plt.subplots(1, 1, figsize=figsize)
+
+    durations = sorted(idf_results.keys())
+    data_list = [idf_results[d] for d in durations]
+    labels = [f"{d}d" for d in durations]
+
+    bp = ax.boxplot(data_list, patch_artist=True,
+                    widths=0.6, showmeans=True,
+                    meanprops=dict(marker="D", markerfacecolor="red",
+                                   markersize=5))
+    ax.set_xticks(range(1, len(labels) + 1))
+    ax.set_xticklabels(labels)
+
+    colors = plt.cm.viridis(np.linspace(0.2, 0.8, len(durations)))
+    for patch, color in zip(bp["boxes"], colors):
+        patch.set_facecolor(color)
+        patch.set_alpha(0.7)
+
+    # Connect means with a line
+    means = [np.mean(idf_results[d]) for d in durations]
+    ax.plot(range(1, len(durations) + 1), means, "r--", linewidth=1,
+            label="Mean", alpha=0.7)
+
+    ax.set_xlabel("Duration")
+    ax.set_ylabel(f"Rolling Max {variable}")
+    ax.set_title(f"{variable} Intensity-Duration Analysis")
+    ax.legend()
+    fig.tight_layout()
+
+    if save_path:
+        fig.savefig(save_path)
+        logger.info("Saved: %s", save_path)
+
+    return fig, ax
+
+
+def plot_snowmelt_fdi_lag(years, snowmelt_doys, fire_onset_doys, lags,
+                          figsize=(12, 5), save_path=None):
+    """Dual-axis plot of snowmelt date, fire onset date, and lag.
+
+    Args:
+        years: array of years
+        snowmelt_doys: array of snowmelt day-of-year per year
+        fire_onset_doys: array of fire onset day-of-year per year
+        lags: array of lag in days (fire_onset - snowmelt) per year
+        figsize: figure size
+        save_path: output path
+
+    Returns:
+        fig, (ax1, ax2)
+    """
+    import matplotlib.pyplot as plt
+    _apply_style()
+
+    fig, ax1 = plt.subplots(1, 1, figsize=figsize)
+    ax2 = ax1.twinx()
+
+    # Left axis: DOY values
+    ax1.plot(years, snowmelt_doys, "o-", color="#1f77b4", linewidth=1.5,
+             markersize=5, label="Snowmelt date (DOY)")
+    ax1.plot(years, fire_onset_doys, "s-", color="#d62728", linewidth=1.5,
+             markersize=5, label="Fire onset date (DOY)")
+    ax1.set_ylabel("Day of Year")
+    ax1.set_xlabel("Year")
+
+    # Right axis: lag bars
+    ax2.bar(years, lags, alpha=0.3, color="#2ca02c", label="Lag (days)",
+            width=0.6)
+    ax2.set_ylabel("Lag (days)")
+
+    # Trend lines
+    years_arr = np.array(years, dtype=float)
+    if len(years) >= 3:
+        z_snow = np.polyfit(years_arr, snowmelt_doys, 1)
+        ax1.plot(years, np.polyval(z_snow, years_arr), "--", color="#1f77b4",
+                 linewidth=1, alpha=0.6)
+        z_fire = np.polyfit(years_arr, fire_onset_doys, 1)
+        ax1.plot(years, np.polyval(z_fire, years_arr), "--", color="#d62728",
+                 linewidth=1, alpha=0.6)
+        z_lag = np.polyfit(years_arr, lags, 1)
+        ax2.plot(years, np.polyval(z_lag, years_arr), "--", color="#2ca02c",
+                 linewidth=1, alpha=0.6)
+
+    ax1.set_title("Snowmelt-to-Fire Season Lag Analysis")
+
+    # Combine legends
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper left")
+
+    fig.tight_layout()
+
+    if save_path:
+        fig.savefig(save_path)
+        logger.info("Saved: %s", save_path)
+
+    return fig, (ax1, ax2)
+
+
+def plot_snow_fdi_crosscorrelation(lags, correlations, optimal_lag,
+                                   figsize=(8, 5), save_path=None):
+    """Cross-correlation function plot between snowmelt and FDI.
+
+    Args:
+        lags: array of lag values in days
+        correlations: array of correlation values at each lag
+        optimal_lag: optimal lag value to highlight
+        figsize: figure size
+        save_path: output path
+
+    Returns:
+        fig, ax
+    """
+    import matplotlib.pyplot as plt
+    _apply_style()
+
+    fig, ax = plt.subplots(1, 1, figsize=figsize)
+
+    ax.bar(lags, correlations, width=0.8, color="#1f77b4", alpha=0.7,
+           edgecolor="none")
+    ax.axvline(optimal_lag, color="#d62728", linestyle="--", linewidth=1.5,
+               label=f"Optimal lag = {optimal_lag} days")
+    ax.axhline(0, color="black", linewidth=0.5)
+
+    # Significance bounds (approximate 95% CI for white noise)
+    n_eff = len(correlations)
+    if n_eff > 0:
+        ci = 1.96 / np.sqrt(n_eff)
+        ax.axhline(ci, color="gray", linestyle=":", linewidth=0.8,
+                   label=f"95% CI (+/-{ci:.2f})")
+        ax.axhline(-ci, color="gray", linestyle=":", linewidth=0.8)
+
+    ax.set_xlabel("Lag (days)")
+    ax.set_ylabel("Correlation")
+    ax.set_title("Snow-FDI Cross-Correlation")
+    ax.legend()
+    ax.grid(True, alpha=0.2)
+    fig.tight_layout()
+
+    if save_path:
+        fig.savefig(save_path)
+        logger.info("Saved: %s", save_path)
+
+    return fig, ax
+
+
+def plot_snowmelt_rate_severity(bins_data, variable, figsize=(10, 6),
+                                save_path=None):
+    """Box plots of FDI values grouped by snowmelt rate category.
+
+    Shows whether faster snowmelt leads to higher FDI values.
+
+    Args:
+        bins_data: dict mapping category name (e.g., "Fast", "Medium",
+                   "Slow") → array of FDI values
+        variable: FDI variable name for labeling
+        figsize: figure size
+        save_path: output path
+
+    Returns:
+        fig, ax
+    """
+    import matplotlib.pyplot as plt
+    _apply_style()
+
+    fig, ax = plt.subplots(1, 1, figsize=figsize)
+
+    # Order categories from Fast to Slow
+    order = ["Fast", "Medium", "Slow"]
+    categories = [c for c in order if c in bins_data]
+    # Add any categories not in the standard order
+    for c in bins_data:
+        if c not in categories:
+            categories.append(c)
+
+    data_list = [bins_data[c] for c in categories]
+    category_colors = {"Fast": "#d62728", "Medium": "#ff7f0e", "Slow": "#2ca02c"}
+
+    bp = ax.boxplot(data_list, patch_artist=True,
+                    widths=0.5, showmeans=True,
+                    meanprops=dict(marker="D", markerfacecolor="black",
+                                   markersize=5))
+    ax.set_xticks(range(1, len(categories) + 1))
+    ax.set_xticklabels(categories)
+
+    for patch, cat in zip(bp["boxes"], categories):
+        patch.set_facecolor(category_colors.get(cat, "#999999"))
+        patch.set_alpha(0.7)
+
+    ax.set_xlabel("Snowmelt Rate Category")
+    ax.set_ylabel(f"{variable} Value")
+    ax.set_title(f"{variable} by Snowmelt Rate Category")
+
+    # Add sample sizes
+    for i, cat in enumerate(categories):
+        n = len(bins_data[cat])
+        ax.text(i + 1, ax.get_ylim()[0], f"n={n}", ha="center", va="bottom",
+                fontsize=7)
+
+    fig.tight_layout()
+
+    if save_path:
+        fig.savefig(save_path)
+        logger.info("Saved: %s", save_path)
+
+    return fig, ax
+
+
 def generate_all_figures(data_store, output_dir, fdis=None, months=None):
     """Generate a complete set of publication figures.
 
@@ -618,6 +1104,80 @@ def generate_all_figures(data_store, output_dir, fdis=None, months=None):
             generated.append(str(path))
         except Exception as e:
             logger.warning("Failed similarity matrix: %s", e)
+
+    # --- Figure 5: Severity distribution per FDI ---
+    for fdi in fdis:
+        if fdi not in fdi_data:
+            continue
+        try:
+            dates, data = fdi_data[fdi]
+            from . import intensity
+            if fdi not in intensity.SEVERITY_LEVELS:
+                continue
+            yearly_dist = intensity.annual_severity_distribution(data, dates, fdi)
+            if yearly_dist:
+                path = output_dir / f"severity_distribution_{fdi}.png"
+                fig, _ = plot_severity_distribution(
+                    yearly_dist, fdi, save_path=str(path))
+                plt.close(fig)
+                generated.append(str(path))
+        except Exception as e:
+            logger.warning("Failed severity distribution for %s: %s", fdi, e)
+
+    # --- Figure 6: Extreme event timeline per FDI ---
+    for fdi in fdis:
+        if fdi not in fdi_data:
+            continue
+        try:
+            dates, data = fdi_data[fdi]
+            from . import intensity
+            events = intensity.extreme_event_catalog(data, dates, fdi)
+            path = output_dir / f"extreme_events_{fdi}.png"
+            fig, _ = plot_extreme_event_timeline(
+                events, fdi, save_path=str(path))
+            plt.close(fig)
+            generated.append(str(path))
+        except Exception as e:
+            logger.warning("Failed extreme event timeline for %s: %s", fdi, e)
+
+    # --- Figure 7: Return period analysis per FDI ---
+    for fdi in fdis:
+        if fdi not in fdi_data:
+            continue
+        try:
+            dates, data = fdi_data[fdi]
+            from . import intensity
+            rp_result = intensity.return_period_analysis(data, dates, fdi)
+            if rp_result:
+                path = output_dir / f"return_period_{fdi}.png"
+                fig, _ = plot_return_periods(
+                    rp_result["return_periods"],
+                    rp_result["return_levels"],
+                    rp_result["annual_maxima"],
+                    fdi,
+                    gev_params=rp_result.get("gev_params"),
+                    save_path=str(path))
+                plt.close(fig)
+                generated.append(str(path))
+        except Exception as e:
+            logger.warning("Failed return period for %s: %s", fdi, e)
+
+    # --- Figure 8: All-indices seasonal overlay ---
+    if len(fdi_data) >= 2:
+        try:
+            seasonal_profiles = {}
+            for fdi_name, (fdi_dates, fdi_arr) in fdi_data.items():
+                _, profile = seasonality.compute_seasonal_profile(
+                    fdi_dates, fdi_arr)
+                seasonal_profiles[fdi_name] = profile
+            if seasonal_profiles:
+                path = output_dir / "all_indices_seasonal_overlay.png"
+                fig, _ = plot_all_indices_seasonal_overlay(
+                    seasonal_profiles, save_path=str(path))
+                plt.close(fig)
+                generated.append(str(path))
+        except Exception as e:
+            logger.warning("Failed all-indices overlay: %s", e)
 
     logger.info("Generated %d figures in %s", len(generated), output_dir)
     return generated

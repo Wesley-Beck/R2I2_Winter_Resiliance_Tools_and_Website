@@ -230,7 +230,12 @@ def detect_snowmelt_date(snow_timeseries, dates, threshold_fraction=0.1):
     snowmelt_doys = np.full(n_points, np.nan)
 
     doys = np.array([d.timetuple().tm_yday for d in dates])
-    seasonal_max = np.nanmax(snow_timeseries, axis=0)
+    # All-NaN columns (snow-free points) legitimately produce NaN here
+    with np.errstate(all="ignore"):
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=RuntimeWarning)
+            seasonal_max = np.nanmax(snow_timeseries, axis=0)
 
     # Points with negligible snow get NaN
     no_snow = (seasonal_max <= 0) | np.isnan(seasonal_max)

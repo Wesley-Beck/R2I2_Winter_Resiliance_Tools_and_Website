@@ -761,5 +761,621 @@ def analyze_monte_carlo(data_dir, figures_dir, n_samples, fdis):
     click.echo(f"Saved: {path}")
 
 
+@main.command(name="analyze-intensity")
+@click.option("--data-dir", default="./data/output",
+              help="Base output directory with SQLite data")
+@click.option("--figures-dir", default="./data/figures",
+              help="Directory to save generated figures")
+@click.option("--fdis", default=None,
+              help="Comma-separated FDI names")
+def analyze_intensity(data_dir, figures_dir, fdis):
+    """Run intensity analysis: severity distributions, extreme events, return periods.
+
+    Computes severity-level distributions per year, catalogs extreme events,
+    performs return period / GEV analysis, and generates all intensity figures
+    including the all-indices seasonal overlay.
+
+    Example:
+        aorc-tools analyze-intensity --data-dir ./data/output --fdis FWI,ERC,BI
+    """
+    from pathlib import Path
+    from aorc_tools.analysis.data_access import AnalysisDataStore
+    from aorc_tools.analysis import ALL_FDI_VARS
+
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    store = AnalysisDataStore(data_dir)
+    available = store.available_months()
+
+    if not available:
+        click.echo("No data found. Run 'aorc-tools extract' first.", err=True)
+        sys.exit(1)
+
+    # Parse FDI filter
+    fdi_list = None
+    if fdis:
+        fdi_list = [f.strip() for f in fdis.split(",")]
+    else:
+        y, m = available[0]
+        all_vars = store.get_variables(y, m)
+        fdi_list = [v for v in all_vars if v in ALL_FDI_VARS]
+
+    click.echo(f"Data directory: {data_dir}")
+    click.echo(f"Available months: {len(available)}")
+    click.echo(f"FDIs: {', '.join(fdi_list)}")
+
+    figures_path = Path(figures_dir)
+    figures_path.mkdir(parents=True, exist_ok=True)
+
+    from aorc_tools.analysis import intensity, seasonality
+    from aorc_tools.analysis.figures import (
+        plot_severity_distribution, plot_extreme_event_timeline,
+        plot_return_periods, plot_all_indices_seasonal_overlay,
+    )
+
+    generated = []
+
+    # Load all FDI data
+    fdi_data = {}
+    for fdi in fdi_list:
+        try:
+            click.echo(f"  Loading {fdi}...")
+            dates, data = store.load_multi_month(available, fdi, "daily_max")
+            fdi_data[fdi] = (dates, data)
+        except Exception as e:
+            click.echo(f"  Skipping {fdi}: {e}")
+
+    # Severity distributions
+    click.echo("\nComputing severity distributions...")
+    for fdi, (dates, data) in fdi_data.items():
+        try:
+            if fdi not in intensity.SEVERITY_LEVELS:
+                click.echo(f"  No severity tiers defined for {fdi}, skipping")
+                continue
+            yearly_dist = intensity.annual_severity_distribution(data, dates, fdi)
+            if yearly_dist:
+                path = figures_path / f"severity_distribution_{fdi}.png"
+                fig, _ = plot_severity_distribution(
+                    yearly_dist, fdi, save_path=str(path))
+                plt.close(fig)
+                generated.append(str(path))
+                click.echo(f"  Saved: {path}")
+        except Exception as e:
+            click.echo(f"  Failed severity distribution for {fdi}: {e}")
+
+    # Extreme event cataloging
+    click.echo("\nCataloging extreme events...")
+    for fdi, (dates, data) in fdi_data.items():
+        try:
+            events = intensity.extreme_event_catalog(data, dates, fdi)
+            click.echo(f"  {fdi}: {len(events)} extreme events")
+            path = figures_path / f"extreme_events_{fdi}.png"
+            fig, _ = plot_extreme_event_timeline(
+                events, fdi, save_path=str(path))
+            plt.close(fig)
+            generated.append(str(path))
+            click.echo(f"  Saved: {path}")
+        except Exception as e:
+            click.echo(f"  Failed extreme events for {fdi}: {e}")
+
+    # Return period analysis
+    click.echo("\nComputing return periods...")
+    for fdi, (dates, data) in fdi_data.items():
+        try:
+            rp_result = intensity.return_period_analysis(data, dates, fdi)
+            if rp_result:
+                path = figures_path / f"return_period_{fdi}.png"
+                fig, _ = plot_return_periods(
+                    rp_result["return_periods"],
+                    rp_result["return_levels"],
+                    rp_result["annual_maxima"],
+                    fdi,
+                    gev_params=rp_result.get("gev_params"),
+                    save_path=str(path))
+                plt.close(fig)
+                generated.append(str(path))
+                click.echo(f"  Saved: {path}")
+        except Exception as e:
+            click.echo(f"  Failed return period for {fdi}: {e}")
+
+    # All-indices seasonal overlay
+    if len(fdi_data) >= 2:
+        click.echo("\nGenerating all-indices seasonal overlay...")
+        try:
+            seasonal_profiles = {}
+            for fdi_name, (fdi_dates, fdi_arr) in fdi_data.items():
+                _, profile = seasonality.compute_seasonal_profile(
+                    fdi_dates, fdi_arr)
+                seasonal_profiles[fdi_name] = profile
+            if seasonal_profiles:
+                path = figures_path / "all_indices_seasonal_overlay.png"
+                fig, _ = plot_all_indices_seasonal_overlay(
+                    seasonal_profiles, save_path=str(path))
+                plt.close(fig)
+                generated.append(str(path))
+                click.echo(f"  Saved: {path}")
+        except Exception as e:
+            click.echo(f"  Failed all-indices overlay: {e}")
+
+    click.echo(f"\nGenerated {len(generated)} intensity figures in {figures_dir}")
+
+
+@main.command(name="analyze-snowmelt")
+@click.option("--data-dir", default="./data/output",
+              help="Base output directory with SQLite data")
+@click.option("--snow-file", required=True,
+              help="Path to snow NetCDF file")
+@click.option("--figures-dir", default="./data/figures",
+              help="Directory to save generated figures")
+@click.option("--fdi", default="FWI",
+              help="FDI variable to correlate with snowmelt")
+def analyze_snowmelt(data_dir, snow_file, figures_dir, fdi):
+    """Correlate snowmelt timing with fire danger index onset.
+
+    Loads snow data from a NetCDF file, regrids to FDI grid points,
+    computes snowmelt dates per year, correlates with FDI fire season
+    onset, and generates snowmelt-FDI relationship figures.
+
+    Example:
+        aorc-tools analyze-snowmelt --snow-file ./data/snow.nc --fdi FWI
+    """
+    from pathlib import Path
+    import numpy as np
+
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from aorc_tools.analysis.data_access import AnalysisDataStore
+    from aorc_tools.analysis import seasonality
+    from aorc_tools.analysis.figures import (
+        plot_snowmelt_fdi_lag, plot_snow_fdi_crosscorrelation,
+        plot_snowmelt_rate_severity,
+    )
+
+    store = AnalysisDataStore(data_dir)
+    available = store.available_months()
+
+    if not available:
+        click.echo("No FDI data found. Run 'aorc-tools extract' first.", err=True)
+        sys.exit(1)
+
+    click.echo(f"Data directory: {data_dir}")
+    click.echo(f"Snow file: {snow_file}")
+    click.echo(f"FDI variable: {fdi}")
+
+    figures_path = Path(figures_dir)
+    figures_path.mkdir(parents=True, exist_ok=True)
+    generated = []
+
+    # Load snow NetCDF
+    click.echo("\nLoading snow NetCDF data...")
+    try:
+        import xarray as xr
+        snow_ds = xr.open_dataset(snow_file)
+        click.echo(f"  Variables: {list(snow_ds.data_vars)}")
+        click.echo(f"  Dimensions: {dict(snow_ds.dims)}")
+    except Exception as e:
+        click.echo(f"Failed to load snow file: {e}", err=True)
+        sys.exit(1)
+
+    # Load FDI data
+    click.echo(f"\nLoading {fdi} data...")
+    try:
+        dates, data = store.load_multi_month(available, fdi, "daily_max")
+        click.echo(f"  Loaded {len(dates)} days of {fdi} data")
+    except Exception as e:
+        click.echo(f"Failed to load {fdi}: {e}", err=True)
+        sys.exit(1)
+
+    # Regrid snow data to FDI points
+    click.echo("\nRegridding snow data to FDI grid points...")
+    try:
+        from scipy.interpolate import griddata
+
+        fdi_lats = store.lats
+        fdi_lons = store.lons
+
+        # Detect snow variable (SWE, snow_depth, SNOWH, etc.)
+        snow_var = None
+        for candidate in ["SWE", "swe", "snow_depth", "SNOWH", "snowh",
+                          "snow_water_equivalent", "SNOD"]:
+            if candidate in snow_ds.data_vars:
+                snow_var = candidate
+                break
+        if snow_var is None:
+            snow_var = list(snow_ds.data_vars)[0]
+            click.echo(f"  Warning: using first variable '{snow_var}' as snow data")
+        else:
+            click.echo(f"  Using snow variable: {snow_var}")
+
+        snow_data = snow_ds[snow_var]
+        snow_lats = snow_ds["latitude"].values if "latitude" in snow_ds else snow_ds["lat"].values
+        snow_lons = snow_ds["longitude"].values if "longitude" in snow_ds else snow_ds["lon"].values
+        snow_times = snow_ds["time"].values
+
+        # Regrid spatial mean for each time step
+        click.echo("  Computing spatial mean snow values...")
+        snow_spatial_mean = np.nanmean(snow_data.values, axis=tuple(
+            range(1, snow_data.ndim)))
+        click.echo(f"  Snow time series: {len(snow_spatial_mean)} steps")
+    except Exception as e:
+        click.echo(f"Failed to regrid snow data: {e}", err=True)
+        sys.exit(1)
+
+    # Compute snowmelt dates per year
+    click.echo("\nComputing snowmelt dates...")
+    try:
+        import pandas as pd
+        snow_times_pd = pd.to_datetime(snow_times)
+        snow_years = sorted(set(snow_times_pd.year))
+
+        years = []
+        snowmelt_doys = []
+        for yr in snow_years:
+            mask = snow_times_pd.year == yr
+            yr_snow = snow_spatial_mean[mask]
+            yr_doys = snow_times_pd[mask].dayofyear
+
+            # Snowmelt = first day after peak where SWE drops below 10% of max
+            if len(yr_snow) == 0:
+                continue
+            peak_idx = np.nanargmax(yr_snow)
+            peak_val = yr_snow[peak_idx]
+            if peak_val <= 0:
+                continue
+            threshold = 0.1 * peak_val
+            post_peak = yr_snow[peak_idx:]
+            melt_indices = np.where(post_peak < threshold)[0]
+            if len(melt_indices) > 0:
+                melt_doy = yr_doys[peak_idx + melt_indices[0]]
+                years.append(yr)
+                snowmelt_doys.append(melt_doy)
+
+        click.echo(f"  Found snowmelt dates for {len(years)} years")
+    except Exception as e:
+        click.echo(f"Failed to compute snowmelt dates: {e}", err=True)
+        sys.exit(1)
+
+    # Compute fire onset dates per year
+    click.echo(f"\nComputing {fdi} fire season onset dates...")
+    try:
+        from datetime import datetime as _dt
+
+        # Group dates/data by year for detect_season_by_year (expects
+        # {year: (dates, array)} plus a scalar threshold).
+        all_years = np.array([int(d[:4]) for d in dates])
+        yearly_data = {}
+        first_doy = {}
+        for yr in np.unique(all_years):
+            yr_mask = all_years == yr
+            yr_dates = [d for d, keep in zip(dates, yr_mask) if keep]
+            yearly_data[int(yr)] = (yr_dates, data[yr_mask])
+            # DOY of this year's first available day, to convert onset index → DOY
+            first_doy[int(yr)] = _dt.strptime(yr_dates[0][:10], "%Y-%m-%d").timetuple().tm_yday
+
+        # Data-driven threshold: 60th percentile of the spatial-mean series
+        spatial_mean_all = np.nanmean(data, axis=1)
+        threshold = float(np.nanpercentile(spatial_mean_all, 60))
+        click.echo(f"  Using onset threshold = {threshold:.1f} ({fdi} 60th pct)")
+
+        yearly_results = seasonality.detect_season_by_year(yearly_data, threshold)
+        fire_onset_doys = []
+        valid_years = []
+        valid_snowmelt = []
+
+        for i, yr in enumerate(years):
+            if yr in yearly_results:
+                onset = yearly_results[yr]["spatial_mean_onset"]
+                if onset is not None and not np.isnan(onset):
+                    valid_years.append(yr)
+                    valid_snowmelt.append(snowmelt_doys[i])
+                    # onset is a mean day-index into the year; convert to DOY
+                    fire_onset_doys.append(onset + first_doy.get(yr, 1) - 1)
+
+        lags = [f - s for f, s in zip(fire_onset_doys, valid_snowmelt)]
+        click.echo(f"  Matched {len(valid_years)} years with both snowmelt and fire onset")
+    except Exception as e:
+        click.echo(f"Failed to compute fire onset: {e}", err=True)
+        sys.exit(1)
+
+    if len(valid_years) < 3:
+        click.echo("Too few matching years for analysis.", err=True)
+        sys.exit(1)
+
+    # Generate snowmelt-FDI lag figure
+    click.echo("\nGenerating snowmelt-FDI lag figure...")
+    try:
+        path = figures_path / f"snowmelt_fdi_lag_{fdi}.png"
+        fig, _ = plot_snowmelt_fdi_lag(
+            valid_years, valid_snowmelt, fire_onset_doys, lags,
+            save_path=str(path))
+        plt.close(fig)
+        generated.append(str(path))
+        click.echo(f"  Saved: {path}")
+    except Exception as e:
+        click.echo(f"  Failed: {e}")
+
+    # Cross-correlation analysis
+    click.echo("\nComputing cross-correlation...")
+    try:
+        # Compute daily cross-correlation between snow and FDI
+        fdi_spatial_mean = np.nanmean(data, axis=1)
+
+        # Align time series
+        import pandas as pd
+        fdi_dates_pd = pd.to_datetime(dates)
+        common_start = max(fdi_dates_pd[0], snow_times_pd[0])
+        common_end = min(fdi_dates_pd[-1], snow_times_pd[-1])
+
+        fdi_mask = (fdi_dates_pd >= common_start) & (fdi_dates_pd <= common_end)
+        snow_mask = (snow_times_pd >= common_start) & (snow_times_pd <= common_end)
+
+        fdi_aligned = fdi_spatial_mean[fdi_mask]
+        snow_aligned = snow_spatial_mean[snow_mask]
+
+        # Resample to same length if needed (use shorter)
+        min_len = min(len(fdi_aligned), len(snow_aligned))
+        fdi_aligned = fdi_aligned[:min_len]
+        snow_aligned = snow_aligned[:min_len]
+
+        max_lag = min(180, min_len // 2)
+        cc_lags = np.arange(-max_lag, max_lag + 1)
+        correlations = np.zeros(len(cc_lags))
+
+        for i, lag in enumerate(cc_lags):
+            if lag >= 0:
+                s = snow_aligned[:min_len - lag]
+                f = fdi_aligned[lag:]
+            else:
+                s = snow_aligned[-lag:]
+                f = fdi_aligned[:min_len + lag]
+            if len(s) > 0 and np.std(s) > 0 and np.std(f) > 0:
+                correlations[i] = np.corrcoef(s, f)[0, 1]
+
+        optimal_idx = np.argmax(np.abs(correlations))
+        optimal_lag = cc_lags[optimal_idx]
+        click.echo(f"  Optimal lag: {optimal_lag} days (r={correlations[optimal_idx]:.3f})")
+
+        path = figures_path / f"snow_fdi_crosscorrelation_{fdi}.png"
+        fig, _ = plot_snow_fdi_crosscorrelation(
+            cc_lags, correlations, optimal_lag, save_path=str(path))
+        plt.close(fig)
+        generated.append(str(path))
+        click.echo(f"  Saved: {path}")
+    except Exception as e:
+        click.echo(f"  Failed cross-correlation: {e}")
+
+    # Snowmelt rate vs FDI severity
+    click.echo("\nAnalyzing snowmelt rate vs FDI severity...")
+    try:
+        import pandas as pd
+        snow_times_pd = pd.to_datetime(snow_times)
+        # Compute melt rate per year (days from peak to melt)
+        melt_rates = []
+        melt_fdi_values = []
+
+        for yr in valid_years:
+            mask = snow_times_pd.year == yr
+            yr_snow = snow_spatial_mean[mask]
+            if len(yr_snow) == 0:
+                continue
+            peak_idx = np.nanargmax(yr_snow)
+            peak_val = yr_snow[peak_idx]
+            if peak_val <= 0:
+                continue
+            threshold = 0.1 * peak_val
+            post_peak = yr_snow[peak_idx:]
+            melt_indices = np.where(post_peak < threshold)[0]
+            if len(melt_indices) > 0:
+                melt_duration = melt_indices[0]  # days from peak to melt
+                melt_rates.append(melt_duration)
+
+                # Get FDI values for fire season of this year
+                fdi_dates_pd_arr = pd.to_datetime(dates)
+                yr_fdi_mask = fdi_dates_pd_arr.year == yr
+                yr_fdi = np.nanmean(data[yr_fdi_mask], axis=1)
+                if len(yr_fdi) > 0:
+                    melt_fdi_values.append(np.nanmax(yr_fdi))
+                else:
+                    melt_fdi_values.append(np.nan)
+
+        if len(melt_rates) >= 3:
+            melt_rates = np.array(melt_rates)
+            melt_fdi_values = np.array(melt_fdi_values)
+
+            # Bin into Fast/Medium/Slow thirds
+            terciles = np.percentile(melt_rates, [33, 67])
+            bins_data = {"Fast": [], "Medium": [], "Slow": []}
+            for rate, fdi_val in zip(melt_rates, melt_fdi_values):
+                if np.isnan(fdi_val):
+                    continue
+                if rate <= terciles[0]:
+                    bins_data["Fast"].append(fdi_val)
+                elif rate <= terciles[1]:
+                    bins_data["Medium"].append(fdi_val)
+                else:
+                    bins_data["Slow"].append(fdi_val)
+
+            # Convert to arrays
+            bins_data = {k: np.array(v) for k, v in bins_data.items() if len(v) > 0}
+
+            if bins_data:
+                path = figures_path / f"snowmelt_rate_severity_{fdi}.png"
+                fig, _ = plot_snowmelt_rate_severity(
+                    bins_data, fdi, save_path=str(path))
+                plt.close(fig)
+                generated.append(str(path))
+                click.echo(f"  Saved: {path}")
+    except Exception as e:
+        click.echo(f"  Failed snowmelt rate analysis: {e}")
+
+    snow_ds.close()
+    click.echo(f"\nGenerated {len(generated)} snowmelt figures in {figures_dir}")
+
+
+@main.command(name="analyze-all")
+@click.option("--data-dir", default="./data/output",
+              help="Base output directory with SQLite data")
+@click.option("--figures-dir", default="./data/figures",
+              help="Directory to save generated figures")
+@click.option("--snow-file", default=None,
+              help="Optional snow NetCDF file for snowmelt analysis")
+def analyze_all(data_dir, figures_dir, snow_file):
+    """Run ALL analyses in sequence: figures, intensity, correlation, monte carlo, snowmelt.
+
+    This is the all-in-one analysis command. It runs:
+    1. Basic publication figures (hotspots, seasonal profiles, etc.)
+    2. Intensity analysis (severity, extreme events, return periods)
+    3. FDI-wildfire correlation analysis
+    4. Monte Carlo FDI comparison
+    5. Snowmelt analysis (if --snow-file provided)
+
+    Example:
+        aorc-tools analyze-all --data-dir ./data/output --figures-dir ./data/figures
+        aorc-tools analyze-all --snow-file ./data/snow.nc
+    """
+    from pathlib import Path
+    from aorc_tools.analysis.data_access import AnalysisDataStore
+
+    store = AnalysisDataStore(data_dir)
+    available = store.available_months()
+
+    if not available:
+        click.echo("No data found. Run 'aorc-tools extract' first.", err=True)
+        sys.exit(1)
+
+    click.echo(f"Data directory: {data_dir}")
+    click.echo(f"Available months: {len(available)}")
+    click.echo(f"Figures directory: {figures_dir}")
+
+    figures_path = Path(figures_dir)
+    figures_path.mkdir(parents=True, exist_ok=True)
+
+    # Step 1: Basic figures
+    click.echo("\n=== Step 1: Basic Publication Figures ===")
+    try:
+        from aorc_tools.analysis.figures import generate_all_figures
+        generated = generate_all_figures(store, figures_dir)
+        click.echo(f"  Generated {len(generated)} basic figures")
+    except Exception as e:
+        click.echo(f"  Failed basic figures: {e}")
+
+    # Step 2: shared setup for correlation / Monte Carlo steps.
+    # Intensity figures (severity, extreme events, return periods, all-indices
+    # overlay) are already produced by generate_all_figures() in Step 1.
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    from aorc_tools.analysis import ALL_FDI_VARS
+
+    y, m = available[0]
+    all_vars = store.get_variables(y, m)
+    fdi_list = [v for v in all_vars if v in ALL_FDI_VARS]
+
+    # Step 3: Correlation analysis
+    click.echo("\n=== Step 3: Correlation Analysis ===")
+    try:
+        from aorc_tools.analysis.correlation import (
+            fetch_nifc_fires, build_fire_calendar, compare_fdis, roc_analysis,
+        )
+        from aorc_tools.analysis.figures import plot_roc_curves
+
+        fires = fetch_nifc_fires(2000, 2024)
+        click.echo(f"  Found {len(fires)} NIFC fires")
+
+        fire_dates, fires_by_date = build_fire_calendar(fires, 2000, 2024)
+
+        fdi_data_corr = {}
+        dates_all = None
+        for fdi in fdi_list:
+            try:
+                d, arr = store.load_multi_month(available, fdi, "daily_max")
+                fdi_data_corr[fdi] = arr
+                if dates_all is None:
+                    dates_all = d
+            except Exception:
+                pass
+
+        if fdi_data_corr and dates_all is not None:
+            fire_binary = np.array([1 if d in fire_dates else 0
+                                    for d in dates_all])
+            comparison, ranking = compare_fdis(
+                fdi_data_corr, fire_binary, dates_all, fire_dates)
+
+            roc_results = {}
+            for name, arr in fdi_data_corr.items():
+                spatial_mean = np.nanmean(arr, axis=1)
+                roc_results[name] = roc_analysis(spatial_mean, fire_binary)
+
+            path = figures_path / "roc_curves_wildfire.png"
+            fig, _ = plot_roc_curves(roc_results, save_path=str(path))
+            plt.close(fig)
+            click.echo(f"  Saved ROC curves")
+    except Exception as e:
+        click.echo(f"  Failed correlation analysis: {e}")
+
+    # Step 4: Monte Carlo
+    click.echo("\n=== Step 4: Monte Carlo Analysis ===")
+    try:
+        from aorc_tools.analysis.monte_carlo import (
+            monte_carlo_fdi_comparison, fdi_similarity_matrix,
+        )
+        from aorc_tools.analysis.figures import plot_similarity_matrix
+
+        fdi_data_mc = {}
+        for fdi in fdi_list:
+            try:
+                _, arr = store.load_multi_month(available, fdi, "daily_max")
+                fdi_data_mc[fdi] = arr
+            except Exception:
+                pass
+
+        if len(fdi_data_mc) >= 2:
+            mc_result = monte_carlo_fdi_comparison(fdi_data_mc, n_samples=500)
+            path = figures_path / "fdi_monte_carlo_overlap.png"
+            fig, _ = plot_similarity_matrix(
+                mc_result["names"], mc_result["mean_similarity"],
+                title="Monte Carlo Hotspot Overlap (n=500)",
+                save_path=str(path))
+            plt.close(fig)
+            click.echo(f"  Saved Monte Carlo overlap figure")
+
+            fdi_means = {n: np.nanmean(d, axis=0) for n, d in fdi_data_mc.items()}
+            corr_names, corr_matrix, _ = fdi_similarity_matrix(fdi_means)
+            path = figures_path / "fdi_similarity_rank_correlation.png"
+            fig, _ = plot_similarity_matrix(
+                corr_names, corr_matrix,
+                title="FDI Rank Correlation",
+                save_path=str(path))
+            plt.close(fig)
+            click.echo(f"  Saved similarity matrix")
+    except Exception as e:
+        click.echo(f"  Failed Monte Carlo: {e}")
+
+    # Step 5: Snowmelt (optional)
+    if snow_file:
+        click.echo("\n=== Step 5: Snowmelt Analysis ===")
+        click.echo(f"  Snow file: {snow_file}")
+        try:
+            # Invoke the analyze-snowmelt command logic via Click context
+            ctx = click.get_current_context()
+            ctx.invoke(analyze_snowmelt, data_dir=data_dir,
+                       snow_file=snow_file, figures_dir=figures_dir,
+                       fdi="FWI")
+        except Exception as e:
+            click.echo(f"  Failed snowmelt analysis: {e}")
+    else:
+        click.echo("\n=== Step 5: Snowmelt Analysis (skipped, no --snow-file) ===")
+
+    click.echo("\n=== All analyses complete! ===")
+    click.echo(f"Figures saved to: {figures_dir}")
+
+
 if __name__ == "__main__":
     main()
