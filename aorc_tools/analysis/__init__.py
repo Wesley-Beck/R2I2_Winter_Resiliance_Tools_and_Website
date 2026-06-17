@@ -7,6 +7,8 @@ Modules:
     seasonality   — Fire season onset/offset detection with tunable filters
     correlation   — FDI-wildfire occurrence correlation analysis
     monte_carlo   — Monte Carlo FDI cross-comparison and similarity
+    intensity     — Wildfire intensity: severity, extreme events, return periods
+    snowmelt      — Snow–fire danger correlation (NetCDF snow vs FDI)
     figures       — Publication-quality figure generation
 """
 
